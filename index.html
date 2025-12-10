@@ -4,11 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>UFO Prototype - Round Ships & Keyboard</title>
+    <title>UFO Battle - Scenes</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body {
             margin: 0;
-            background: #000;
+            background: #050505;
             overflow: hidden;
             touch-action: none;
         }
@@ -16,134 +17,404 @@
         canvas {
             display: block;
         }
+
+        .font-loader {
+            position: absolute;
+            opacity: 0;
+            font-family: 'Orbitron';
+            font-weight: 700;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 </head>
 
 <body>
 
+    <div class="font-loader">.</div>
+
     <script>
+        // --- GLOBAL CONFIG ---
+        const ZONE_SIZE = 250;
+        const WIN_SCORE = 30;
+
+        // --- SCENE 1: MAIN MENU ---
+        class MainMenu extends Phaser.Scene {
+            constructor() {
+                super({ key: 'MainMenu' });
+            }
+
+            create() {
+                const w = this.scale.width;
+                const h = this.scale.height;
+
+                // Background Starfield (Static)
+                this.add.graphics()
+                    .fillStyle(0xffffff, 0.1)
+                    .fillCircle(w * 0.2, h * 0.2, 2)
+                    .fillCircle(w * 0.8, h * 0.8, 3)
+                    .fillCircle(w * 0.1, h * 0.9, 1)
+                    .fillCircle(w * 0.9, h * 0.1, 2);
+
+                // Title
+                this.add.text(w / 2, h * 0.2, 'NEON DRIFT', {
+                    fontFamily: 'Orbitron', fontSize: '60px', fontWeight: '900', color: '#ffffff'
+                }).setOrigin(0.5);
+
+                // --- BUTTONS ---
+                this.createButton(w / 2, h * 0.45, 'PLAY GAME', 0x00ff00, () => this.scene.start('GameScene'));
+                this.createButton(w / 2, h * 0.6, 'RULES', 0x0088ff, () => this.toggleRules(true));
+
+                // --- RULES OVERLAY (Hidden by default) ---
+                this.rulesContainer = this.add.container(0, 0);
+                this.rulesContainer.setVisible(false);
+                this.rulesContainer.setDepth(200);
+
+                // Dark background for rules
+                const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9);
+
+                const rulesText = `
+MISSION:
+Collect 30 points to win.
+
+CONTROLS:
+Swipe in your colored corner
+to move.
+
+SCORING:
+Rocks grow over time.
+Small Rock: 1 pt
+Med Rock: 2 pts
+Large Rock: 5 pts
+
+COLLISIONS:
+If ships crash, the FASTER ship
+was reckless and loses half its points.
+        `;
+
+                const txt = this.add.text(w / 2, h / 2 - 50, rulesText, {
+                    fontFamily: 'Orbitron', fontSize: '20px', color: '#ffffff', align: 'center', lineSpacing: 10
+                }).setOrigin(0.5);
+
+                // Close Button
+                const closeBtn = this.add.text(w / 2, h * 0.85, '[ CLOSE ]', {
+                    fontFamily: 'Orbitron', fontSize: '30px', color: '#ff0044'
+                }).setOrigin(0.5).setInteractive();
+
+                closeBtn.on('pointerdown', () => this.toggleRules(false));
+
+                this.rulesContainer.add([bg, txt, closeBtn]);
+            }
+
+            createButton(x, y, text, color, callback) {
+                const btn = this.add.text(x, y, text, {
+                    fontFamily: 'Orbitron', fontSize: '40px', fontWeight: 'bold', color: '#ffffff',
+                    backgroundColor: '#222222', padding: { x: 20, y: 10 }
+                }).setOrigin(0.5).setInteractive();
+
+                // Hover/Touch effects
+                btn.on('pointerover', () => btn.setStyle({ fill: '#ffff00' }));
+                btn.on('pointerout', () => btn.setStyle({ fill: '#ffffff' }));
+                btn.on('pointerdown', callback);
+            }
+
+            toggleRules(show) {
+                this.rulesContainer.setVisible(show);
+            }
+        }
+
+
+        // --- SCENE 2: THE GAME ---
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+            }
+
+            // Initialize variables per session
+            create() {
+                this.score1 = 0;
+                this.score2 = 0;
+                this.isGameOver = false;
+
+                this.input.addPointer(2);
+                this.cursors = this.input.keyboard.createCursorKeys();
+
+                // Generate Graphics (We call this again to ensure context exists)
+                this.generateTextures();
+
+                // Particles
+                this.particles = this.add.particles(0, 0, 'spark', {
+                    speed: { min: 50, max: 150 }, scale: { start: 1, end: 0 },
+                    blendMode: 'ADD', lifespan: 300, emitting: false
+                });
+
+                // Setup Objects
+                this.setupShips();
+                this.setupAsteroids();
+                this.setupCollisions();
+                this.setupUI();
+                this.setupInput();
+            }
+
+            update() {
+                if (this.isGameOver) return;
+
+                this.physics.world.wrap(this.ship1, 20);
+                this.physics.world.wrap(this.ship2, 20);
+                this.physics.world.wrap(this.asteroids, 60);
+
+                // Keyboard Debugging
+                const IMPULSE = 300;
+                if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) this.ship1.setVelocityX(this.ship1.body.velocity.x - IMPULSE);
+                if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.ship1.setVelocityX(this.ship1.body.velocity.x + IMPULSE);
+                if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) this.ship1.setVelocityY(this.ship1.body.velocity.y - IMPULSE);
+                if (Phaser.Input.Keyboard.JustDown(this.cursors.down)) this.ship1.setVelocityY(this.ship1.body.velocity.y + IMPULSE);
+            }
+
+            // --- SETUP FUNCTIONS ---
+
+            setupShips() {
+                const p1StartX = ZONE_SIZE / 2;
+                const p1StartY = this.scale.height - (ZONE_SIZE / 2);
+                const p2StartX = this.scale.width - (ZONE_SIZE / 2);
+                const p2StartY = ZONE_SIZE / 2;
+
+                this.ship1 = this.physics.add.sprite(p1StartX, p1StartY, 'ship1_tex').setCircle(20);
+                this.ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex').setCircle(20);
+
+                [this.ship1, this.ship2].forEach(s => {
+                    s.setDamping(false).setDrag(0).setBounce(0.9).setMaxVelocity(600);
+                });
+            }
+
+            setupAsteroids() {
+                this.asteroids = this.physics.add.group({ classType: Asteroid, runChildUpdate: true });
+                this.spawnEvent = this.time.addEvent({
+                    delay: 4000,
+                    callback: this.spawnAsteroid,
+                    callbackScope: this,
+                    loop: true
+                });
+            }
+
+            setupCollisions() {
+                this.physics.add.collider(this.ship1, this.ship2, this.handlePvpCollision, null, this);
+                this.physics.add.overlap(this.ship1, this.asteroids, (s, a) => this.collectAsteroid(s, a, 1), null, this);
+                this.physics.add.overlap(this.ship2, this.asteroids, (s, a) => this.collectAsteroid(s, a, 2), null, this);
+            }
+
+            setupUI() {
+                // Draw Zones
+                const zg = this.add.graphics();
+                zg.lineStyle(2, 0x444444, 0.3);
+                zg.strokeRect(0, this.scale.height - ZONE_SIZE, ZONE_SIZE, ZONE_SIZE);
+                zg.strokeRect(this.scale.width - ZONE_SIZE, 0, ZONE_SIZE, ZONE_SIZE);
+
+                const fontStyle = { fontFamily: 'Orbitron', fontSize: '32px', fontWeight: 'bold' };
+
+                // Ensure Depth is HIGH (100) so they never hide behind ships
+                this.scoreText1 = this.add.text(20, this.scale.height - 60, 'P1: 0', { ...fontStyle, color: '#ff0044' }).setDepth(100);
+                this.scoreText2 = this.add.text(this.scale.width - 180, 30, 'P2: 0', { ...fontStyle, color: '#0088ff' }).setDepth(100);
+            }
+
+            setupInput() {
+                const IMPULSE_MULTIPLIER = 4;
+                this.input.on('pointerup', (pointer) => {
+                    if (this.isGameOver) return;
+                    const vectorX = pointer.upX - pointer.downX;
+                    const vectorY = pointer.upY - pointer.downY;
+                    if (Math.abs(vectorX) < 5 && Math.abs(vectorY) < 5) return;
+
+                    // Player 1 Zone (Bottom Left)
+                    if (pointer.downX < ZONE_SIZE && pointer.downY > this.scale.height - ZONE_SIZE) {
+                        this.ship1.setVelocity(this.ship1.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), this.ship1.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
+                    }
+                    // Player 2 Zone (Top Right)
+                    else if (pointer.downX > this.scale.width - ZONE_SIZE && pointer.downY < ZONE_SIZE) {
+                        this.ship2.setVelocity(this.ship2.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), this.ship2.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
+                    }
+                });
+            }
+
+            // --- GAMEPLAY LOGIC ---
+
+            spawnAsteroid() {
+                if (this.isGameOver) return;
+                const edge = Phaser.Math.Between(0, 3);
+                let x, y;
+                const buffer = 60;
+                const w = this.scale.width;
+                const h = this.scale.height;
+
+                if (edge === 0) { x = Phaser.Math.Between(0, w); y = -buffer; }
+                else if (edge === 1) { x = w + buffer; y = Phaser.Math.Between(0, h); }
+                else if (edge === 2) { x = Phaser.Math.Between(0, w); y = h + buffer; }
+                else { x = -buffer; y = Phaser.Math.Between(0, h); }
+
+                const asteroid = new Asteroid(this, x, y);
+                this.asteroids.add(asteroid);
+                asteroid.launch(this);
+            }
+
+            collectAsteroid(ship, asteroid, playerNum) {
+                if (this.isGameOver) return;
+                const points = asteroid.points;
+
+                if (playerNum === 1) {
+                    this.score1 += points;
+                    this.scoreText1.setText('P1: ' + this.score1);
+                } else {
+                    this.score2 += points;
+                    this.scoreText2.setText('P2: ' + this.score2);
+                }
+
+                if (asteroid.growthTimer) asteroid.growthTimer.remove();
+                asteroid.destroy();
+
+                this.checkWin();
+            }
+
+            handlePvpCollision(s1, s2) {
+                if (this.isGameOver) return;
+                const speed1 = s1.body.speed;
+                const speed2 = s2.body.speed;
+                if (Math.abs(speed1 - speed2) < 5) return;
+
+                this.cameras.main.shake(200, 0.01);
+                this.particles.emitParticleAt((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 10);
+
+                if (speed1 > speed2) {
+                    const loss = Math.ceil(this.score1 / 2);
+                    this.score1 = Math.max(0, this.score1 - loss);
+                    this.scoreText1.setText('P1: ' + this.score1);
+                    this.showFloatingText(s1.x, s1.y, `-${loss}`, '#ff0044');
+                } else {
+                    const loss = Math.ceil(this.score2 / 2);
+                    this.score2 = Math.max(0, this.score2 - loss);
+                    this.scoreText2.setText('P2: ' + this.score2);
+                    this.showFloatingText(s2.x, s2.y, `-${loss}`, '#0088ff');
+                }
+            }
+
+            showFloatingText(x, y, msg, color) {
+                const txt = this.add.text(x, y, msg, { fontFamily: 'Orbitron', fontSize: '40px', fontWeight: 'bold', color: '#fff', stroke: color, strokeThickness: 4 }).setOrigin(0.5).setDepth(100);
+                this.tweens.add({ targets: txt, y: y - 100, alpha: 0, duration: 1000, onComplete: () => txt.destroy() });
+            }
+
+            checkWin() {
+                if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
+                    this.isGameOver = true;
+                    this.physics.pause();
+
+                    // --- DRAW GAME OVER OVERLAY ---
+                    // 1. Semi-transparent black background
+                    const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.8);
+                    overlay.setDepth(200);
+
+                    // 2. Winner Text
+                    const winner = this.score1 >= WIN_SCORE ? "PLAYER 1" : "PLAYER 2";
+                    const color = this.score1 >= WIN_SCORE ? "#ff0044" : "#0088ff";
+
+                    const winText = this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, `${winner} WINS!`, {
+                        fontFamily: 'Orbitron', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
+                    }).setOrigin(0.5).setDepth(201);
+
+                    // 3. Restart Button
+                    const btn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 80, 'MAIN MENU', {
+                        fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
+                    }).setOrigin(0.5).setDepth(201).setInteractive();
+
+                    btn.on('pointerdown', () => {
+                        this.scene.start('MainMenu');
+                    });
+                }
+            }
+
+            generateTextures() {
+                if (this.textures.exists('ship1_tex')) return; // Don't regenerate if they exist
+
+                // P1 Ship
+                const g1 = this.make.graphics();
+                g1.fillStyle(0xff0044); g1.fillEllipse(20, 20, 40, 40);
+                g1.fillStyle(0xffffff); g1.fillCircle(20, 20, 12);
+                g1.fillStyle(0xffff00);
+                [[20, 5], [20, 35], [5, 20], [35, 20]].forEach(p => g1.fillCircle(p[0], p[1], 3));
+                g1.generateTexture('ship1_tex', 40, 40);
+
+                // P2 Ship
+                const g2 = this.make.graphics();
+                g2.fillStyle(0x0088ff); g2.fillEllipse(20, 20, 40, 40);
+                g2.fillStyle(0xffffff); g2.fillCircle(20, 20, 12);
+                g2.fillStyle(0xffff00);
+                [[20, 5], [20, 35], [5, 20], [35, 20]].forEach(p => g2.fillCircle(p[0], p[1], 3));
+                g2.generateTexture('ship2_tex', 40, 40);
+
+                // Rocks
+                [['asteroid_small', 0x888888, 12], ['asteroid_med', 0xaaaaaa, 22], ['asteroid_large', 0xcccccc, 45]].forEach(data => {
+                    const g = this.make.graphics();
+                    g.fillStyle(data[1]);
+                    const points = [];
+                    for (let i = 0; i < 8; i++) {
+                        const a = (i / 8) * (Math.PI * 2);
+                        const r = data[2] * Phaser.Math.FloatBetween(0.8, 1.2);
+                        points.push({ x: data[2] + Math.cos(a) * r, y: data[2] + Math.sin(a) * r });
+                    }
+                    g.fillPoints(points, true);
+                    g.generateTexture(data[0], data[2] * 2.5, data[2] * 2.5);
+                });
+
+                // Spark
+                const gs = this.make.graphics();
+                gs.fillStyle(0xffffff); gs.fillCircle(4, 4, 4);
+                gs.generateTexture('spark', 8, 8);
+            }
+        }
+
+        // --- ASTEROID CLASS (Same logic as before, moved outside GameScene for cleanliness) ---
+        class Asteroid extends Phaser.Physics.Arcade.Sprite {
+            constructor(scene, x, y) {
+                super(scene, x, y, 'asteroid_small');
+                scene.add.existing(this);
+                scene.physics.add.existing(this);
+                this.stage = 1; this.points = 1;
+                this.body.setBounce(1); this.body.setCircle(12);
+            }
+            launch(scene) {
+                const tx = Phaser.Math.Between(scene.scale.width * 0.2, scene.scale.width * 0.8);
+                const ty = Phaser.Math.Between(scene.scale.height * 0.2, scene.scale.height * 0.8);
+                const angle = Phaser.Math.Angle.Between(this.x, this.y, tx, ty);
+                scene.physics.velocityFromRotation(angle, Phaser.Math.Between(50, 150), this.body.velocity);
+                this.setAngularVelocity(Phaser.Math.Between(-20, 20));
+                this.setNextGrowth(scene);
+            }
+            setNextGrowth(scene) {
+                if (this.stage >= 3) return;
+                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(5000, 10000), () => this.grow());
+            }
+            grow() {
+                if (!this.scene) return;
+                this.scene.tweens.add({
+                    targets: this, scaleX: 0.1, scaleY: 0.1, duration: 200, ease: 'Back.In',
+                    onComplete: () => {
+                        this.stage++;
+                        if (this.stage === 2) { this.setTexture('asteroid_med'); this.body.setCircle(22); this.points = 2; }
+                        else if (this.stage === 3) { this.setTexture('asteroid_large'); this.body.setCircle(45); this.points = 5; }
+                        this.scene.tweens.add({ targets: this, scaleX: 1, scaleY: 1, duration: 400, ease: 'Back.Out' });
+                        this.setNextGrowth(this.scene);
+                    }
+                });
+            }
+        }
+
         const config = {
             type: Phaser.AUTO,
             width: window.innerWidth,
             height: window.innerHeight,
-            backgroundColor: '#1a1a1a',
-            physics: {
-                default: 'arcade',
-                arcade: {
-                    gravity: { x: 0, y: 0 },
-                    debug: false
-                }
-            },
-            scene: {
-                preload: preload,
-                create: create,
-                update: update
-            }
+            backgroundColor: '#050505',
+            physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
+            scene: [MainMenu, GameScene]
         };
 
         const game = new Phaser.Game(config);
-
-        let ship1, ship2;
-        let cursors; // Keyboard input
-        const IMPULSE_MULTIPLIER = 4;
-        const KEYBOARD_IMPULSE = 300; // Fixed strength for arrow keys
-        const ZONE_SIZE = 250;
-
-        function preload() {
-            // No assets needed
-        }
-
-        function create() {
-            this.input.addPointer(2);
-
-            // --- KEYBOARD SETUP ---
-            cursors = this.input.keyboard.createCursorKeys();
-
-            // --- GRAPHICS: ROUND UFOS ---
-
-            // Ship 1 Texture (Red UFO)
-            const g1 = this.make.graphics();
-            g1.fillStyle(0xff4444);
-            g1.fillCircle(20, 20, 20); // Base
-            g1.fillStyle(0xffcccc);
-            g1.fillCircle(20, 20, 8);  // Cockpit
-            g1.generateTexture('ship1_tex', 40, 40);
-
-            // Ship 2 Texture (Blue UFO)
-            const g2 = this.make.graphics();
-            g2.fillStyle(0x4444ff);
-            g2.fillCircle(20, 20, 20); // Base
-            g2.fillStyle(0xccccff);
-            g2.fillCircle(20, 20, 8);  // Cockpit
-            g2.generateTexture('ship2_tex', 40, 40);
-
-            // --- SETUP OBJECTS ---
-
-            const p1StartX = ZONE_SIZE / 2;
-            const p1StartY = this.scale.height - (ZONE_SIZE / 2);
-            const p2StartX = this.scale.width - (ZONE_SIZE / 2);
-            const p2StartY = ZONE_SIZE / 2;
-
-            ship1 = this.physics.add.sprite(p1StartX, p1StartY, 'ship1_tex');
-            ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex');
-
-            // Use circle collision bodies for better bouncing
-            ship1.setCircle(20);
-            ship2.setCircle(20);
-
-            // --- PHYSICS (ZERO FRICTION) ---
-            ship1.setDamping(false).setDrag(0).setBounce(0.9).setMaxVelocity(600);
-            ship2.setDamping(false).setDrag(0).setBounce(0.9).setMaxVelocity(600);
-
-            this.physics.add.collider(ship1, ship2);
-
-            // --- VISUAL DEBUG ZONES ---
-            const zoneGraphics = this.add.graphics();
-            zoneGraphics.lineStyle(2, 0x00ff00, 0.5);
-            zoneGraphics.strokeRect(0, this.scale.height - ZONE_SIZE, ZONE_SIZE, ZONE_SIZE);
-            zoneGraphics.strokeRect(this.scale.width - ZONE_SIZE, 0, ZONE_SIZE, ZONE_SIZE);
-
-            // --- TOUCH INPUT LOGIC ---
-            this.input.on('pointerup', (pointer) => {
-                const vectorX = pointer.upX - pointer.downX;
-                const vectorY = pointer.upY - pointer.downY;
-
-                if (Math.abs(vectorX) < 5 && Math.abs(vectorY) < 5) return;
-
-                // Player 1 (Bottom Left)
-                if (pointer.downX < ZONE_SIZE && pointer.downY > this.scale.height - ZONE_SIZE) {
-                    ship1.setVelocity(ship1.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), ship1.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
-                }
-
-                // Player 2 (Top Right)
-                else if (pointer.downX > this.scale.width - ZONE_SIZE && pointer.downY < ZONE_SIZE) {
-                    ship2.setVelocity(ship2.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), ship2.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
-                }
-            });
-        }
-
-        function update() {
-            this.physics.world.wrap(ship1, 20);
-            this.physics.world.wrap(ship2, 20);
-
-            // --- KEYBOARD TESTING LOGIC (For Player 1) ---
-            // We use JustDown so it acts like a single "Kick" rather than a rocket thruster
-
-            if (Phaser.Input.Keyboard.JustDown(cursors.left)) {
-                ship1.setVelocityX(ship1.body.velocity.x - KEYBOARD_IMPULSE);
-            }
-            else if (Phaser.Input.Keyboard.JustDown(cursors.right)) {
-                ship1.setVelocityX(ship1.body.velocity.x + KEYBOARD_IMPULSE);
-            }
-
-            if (Phaser.Input.Keyboard.JustDown(cursors.up)) {
-                ship1.setVelocityY(ship1.body.velocity.y - KEYBOARD_IMPULSE);
-            }
-            else if (Phaser.Input.Keyboard.JustDown(cursors.down)) {
-                ship1.setVelocityY(ship1.body.velocity.y + KEYBOARD_IMPULSE);
-            }
-        }
     </script>
 
 </body>
