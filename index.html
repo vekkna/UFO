@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>UFO Prototype</title>
+    <title>UFO Prototype - Zero Friction</title>
     <style>
         body {
             margin: 0;
@@ -31,7 +31,7 @@
             physics: {
                 default: 'arcade',
                 arcade: {
-                    gravity: { x: 0, y: 0 }, // Space physics (no gravity)
+                    gravity: { x: 0, y: 0 },
                     debug: false
                 }
             },
@@ -46,74 +46,83 @@
 
         let ship1;
         let ship2;
-        const IMPULSE_MULTIPLIER = 3; // How strong the swipe is
-        const EDGE_ZONE_WIDTH = 150;  // How close to the edge you must swipe (pixels)
+        const IMPULSE_MULTIPLIER = 4;
+        const ZONE_SIZE = 250; // Size of the corner touch squares in pixels
 
         function preload() {
-            // No assets needed, we draw them in 'create'
+            // No assets needed
         }
 
         function create() {
-            // 1. Enable Multitouch (Standard is 2, but we ensure it here)
             this.input.addPointer(2);
 
-            // 2. Create Graphics for Ships (Triangles)
-            // Ship 1 Texture (Red)
+            // --- GRAPHICS & TEXTURES ---
+
+            // Ship 1 (Red)
             const graphics1 = this.make.graphics().fillStyle(0xff4444).fillTriangle(0, 0, 0, 30, 40, 15);
             graphics1.generateTexture('ship1_tex', 40, 30);
 
-            // Ship 2 Texture (Blue)
+            // Ship 2 (Blue)
             const graphics2 = this.make.graphics().fillStyle(0x4444ff).fillTriangle(40, 0, 40, 30, 0, 15);
             graphics2.generateTexture('ship2_tex', 40, 30);
 
-            // 3. Create Physics Sprites
-            // Position them near the middle, slightly offset
-            ship1 = this.physics.add.sprite(this.scale.width / 2 - 100, this.scale.height / 2, 'ship1_tex');
-            ship2 = this.physics.add.sprite(this.scale.width / 2 + 100, this.scale.height / 2, 'ship2_tex');
+            // --- SETUP OBJECTS ---
 
-            // 4. Physics Settings for "Drift"
-            ship1.setDamping(true);
-            ship1.setDrag(0.01); // Very low drag = long drift. Set to 0 for infinite drift.
-            ship1.setBounce(0.5); // Bounciness if they hit each other
+            // Calculate positions based on ZONE_SIZE
+            const p1StartX = ZONE_SIZE / 2;
+            const p1StartY = this.scale.height - (ZONE_SIZE / 2);
 
-            ship2.setDamping(true);
-            ship2.setDrag(0.01);
-            ship2.setBounce(0.5);
+            const p2StartX = this.scale.width - (ZONE_SIZE / 2);
+            const p2StartY = ZONE_SIZE / 2;
 
-            // Enable collisions between ships
+            ship1 = this.physics.add.sprite(p1StartX, p1StartY, 'ship1_tex');
+            ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex');
+
+            // --- PHYSICS (ZERO FRICTION) ---
+            // setDrag(0) ensures they never slow down naturally
+
+            ship1.setDamping(false);
+            ship1.setDrag(0);
+            ship1.setBounce(0.8); // Higher bounce for space feel
+            ship1.setMaxVelocity(600); // Cap max speed so they don't vanish instantly
+
+            ship2.setDamping(false);
+            ship2.setDrag(0);
+            ship2.setBounce(0.8);
+            ship2.setMaxVelocity(600);
+
             this.physics.add.collider(ship1, ship2);
 
-            // 5. Visual Debug Lines for "Swipe Zones"
+            // --- VISUAL DEBUG ZONES ---
             const zoneGraphics = this.add.graphics();
-            zoneGraphics.lineStyle(2, 0x444444);
-            // Left Zone Line
-            zoneGraphics.strokeLineShape(new Phaser.Geom.Line(EDGE_ZONE_WIDTH, 0, EDGE_ZONE_WIDTH, this.scale.height));
-            // Right Zone Line
-            zoneGraphics.strokeLineShape(new Phaser.Geom.Line(this.scale.width - EDGE_ZONE_WIDTH, 0, this.scale.width - EDGE_ZONE_WIDTH, this.scale.height));
+            zoneGraphics.lineStyle(2, 0x00ff00, 0.5);
 
+            // Draw P1 Zone (Bottom Left)
+            zoneGraphics.strokeRect(0, this.scale.height - ZONE_SIZE, ZONE_SIZE, ZONE_SIZE);
 
-            // 6. Input Logic
+            // Draw P2 Zone (Top Right)
+            zoneGraphics.strokeRect(this.scale.width - ZONE_SIZE, 0, ZONE_SIZE, ZONE_SIZE);
+
+            // --- INPUT LOGIC ---
             this.input.on('pointerup', (pointer) => {
-                // Calculate the swipe vector (End - Start)
                 const vectorX = pointer.upX - pointer.downX;
                 const vectorY = pointer.upY - pointer.downY;
 
-                // Filter out accidental taps (must move at least 10 pixels)
-                if (Math.abs(vectorX) < 10 && Math.abs(vectorY) < 10) return;
+                // Ignore tiny taps
+                if (Math.abs(vectorX) < 5 && Math.abs(vectorY) < 5) return;
 
-                // Check WHERE the swipe started to assign it to a player
-
-                // Player 1 Control (Left Edge)
-                if (pointer.downX < EDGE_ZONE_WIDTH) {
-                    // Add velocity to existing velocity (Impulse)
+                // Player 1 Logic: Bottom-Left Corner
+                // X must be within Left Zone, Y must be within Bottom Zone
+                if (pointer.downX < ZONE_SIZE && pointer.downY > this.scale.height - ZONE_SIZE) {
                     ship1.setVelocity(
                         ship1.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER),
                         ship1.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER)
                     );
                 }
 
-                // Player 2 Control (Right Edge)
-                else if (pointer.downX > this.scale.width - EDGE_ZONE_WIDTH) {
+                // Player 2 Logic: Top-Right Corner
+                // X must be within Right Zone, Y must be within Top Zone
+                else if (pointer.downX > this.scale.width - ZONE_SIZE && pointer.downY < ZONE_SIZE) {
                     ship2.setVelocity(
                         ship2.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER),
                         ship2.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER)
@@ -123,8 +132,7 @@
         }
 
         function update() {
-            // 7. Screen Wrapping
-            this.physics.world.wrap(ship1, 20); // 20px padding
+            this.physics.world.wrap(ship1, 20);
             this.physics.world.wrap(ship2, 20);
         }
     </script>
