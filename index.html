@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>UFO Prototype - Zero Friction</title>
+    <title>UFO Prototype - Round Ships & Keyboard</title>
     <style>
         body {
             margin: 0;
@@ -44,10 +44,11 @@
 
         const game = new Phaser.Game(config);
 
-        let ship1;
-        let ship2;
+        let ship1, ship2;
+        let cursors; // Keyboard input
         const IMPULSE_MULTIPLIER = 4;
-        const ZONE_SIZE = 250; // Size of the corner touch squares in pixels
+        const KEYBOARD_IMPULSE = 300; // Fixed strength for arrow keys
+        const ZONE_SIZE = 250;
 
         function preload() {
             // No assets needed
@@ -56,77 +57,68 @@
         function create() {
             this.input.addPointer(2);
 
-            // --- GRAPHICS & TEXTURES ---
+            // --- KEYBOARD SETUP ---
+            cursors = this.input.keyboard.createCursorKeys();
 
-            // Ship 1 (Red)
-            const graphics1 = this.make.graphics().fillStyle(0xff4444).fillTriangle(0, 0, 0, 30, 40, 15);
-            graphics1.generateTexture('ship1_tex', 40, 30);
+            // --- GRAPHICS: ROUND UFOS ---
 
-            // Ship 2 (Blue)
-            const graphics2 = this.make.graphics().fillStyle(0x4444ff).fillTriangle(40, 0, 40, 30, 0, 15);
-            graphics2.generateTexture('ship2_tex', 40, 30);
+            // Ship 1 Texture (Red UFO)
+            const g1 = this.make.graphics();
+            g1.fillStyle(0xff4444);
+            g1.fillCircle(20, 20, 20); // Base
+            g1.fillStyle(0xffcccc);
+            g1.fillCircle(20, 20, 8);  // Cockpit
+            g1.generateTexture('ship1_tex', 40, 40);
+
+            // Ship 2 Texture (Blue UFO)
+            const g2 = this.make.graphics();
+            g2.fillStyle(0x4444ff);
+            g2.fillCircle(20, 20, 20); // Base
+            g2.fillStyle(0xccccff);
+            g2.fillCircle(20, 20, 8);  // Cockpit
+            g2.generateTexture('ship2_tex', 40, 40);
 
             // --- SETUP OBJECTS ---
 
-            // Calculate positions based on ZONE_SIZE
             const p1StartX = ZONE_SIZE / 2;
             const p1StartY = this.scale.height - (ZONE_SIZE / 2);
-
             const p2StartX = this.scale.width - (ZONE_SIZE / 2);
             const p2StartY = ZONE_SIZE / 2;
 
             ship1 = this.physics.add.sprite(p1StartX, p1StartY, 'ship1_tex');
             ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex');
 
+            // Use circle collision bodies for better bouncing
+            ship1.setCircle(20);
+            ship2.setCircle(20);
+
             // --- PHYSICS (ZERO FRICTION) ---
-            // setDrag(0) ensures they never slow down naturally
-
-            ship1.setDamping(false);
-            ship1.setDrag(0);
-            ship1.setBounce(0.8); // Higher bounce for space feel
-            ship1.setMaxVelocity(600); // Cap max speed so they don't vanish instantly
-
-            ship2.setDamping(false);
-            ship2.setDrag(0);
-            ship2.setBounce(0.8);
-            ship2.setMaxVelocity(600);
+            ship1.setDamping(false).setDrag(0).setBounce(0.9).setMaxVelocity(600);
+            ship2.setDamping(false).setDrag(0).setBounce(0.9).setMaxVelocity(600);
 
             this.physics.add.collider(ship1, ship2);
 
             // --- VISUAL DEBUG ZONES ---
             const zoneGraphics = this.add.graphics();
             zoneGraphics.lineStyle(2, 0x00ff00, 0.5);
-
-            // Draw P1 Zone (Bottom Left)
             zoneGraphics.strokeRect(0, this.scale.height - ZONE_SIZE, ZONE_SIZE, ZONE_SIZE);
-
-            // Draw P2 Zone (Top Right)
             zoneGraphics.strokeRect(this.scale.width - ZONE_SIZE, 0, ZONE_SIZE, ZONE_SIZE);
 
-            // --- INPUT LOGIC ---
+            // --- TOUCH INPUT LOGIC ---
             this.input.on('pointerup', (pointer) => {
                 const vectorX = pointer.upX - pointer.downX;
                 const vectorY = pointer.upY - pointer.downY;
 
-                // Ignore tiny taps
                 if (Math.abs(vectorX) < 5 && Math.abs(vectorY) < 5) return;
 
-                // Player 1 Logic: Bottom-Left Corner
-                // X must be within Left Zone, Y must be within Bottom Zone
+                // Player 1 (Bottom Left)
                 if (pointer.downX < ZONE_SIZE && pointer.downY > this.scale.height - ZONE_SIZE) {
-                    ship1.setVelocity(
-                        ship1.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER),
-                        ship1.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER)
-                    );
+                    ship1.setVelocity(ship1.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), ship1.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
                 }
 
-                // Player 2 Logic: Top-Right Corner
-                // X must be within Right Zone, Y must be within Top Zone
+                // Player 2 (Top Right)
                 else if (pointer.downX > this.scale.width - ZONE_SIZE && pointer.downY < ZONE_SIZE) {
-                    ship2.setVelocity(
-                        ship2.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER),
-                        ship2.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER)
-                    );
+                    ship2.setVelocity(ship2.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), ship2.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
                 }
             });
         }
@@ -134,6 +126,23 @@
         function update() {
             this.physics.world.wrap(ship1, 20);
             this.physics.world.wrap(ship2, 20);
+
+            // --- KEYBOARD TESTING LOGIC (For Player 1) ---
+            // We use JustDown so it acts like a single "Kick" rather than a rocket thruster
+
+            if (Phaser.Input.Keyboard.JustDown(cursors.left)) {
+                ship1.setVelocityX(ship1.body.velocity.x - KEYBOARD_IMPULSE);
+            }
+            else if (Phaser.Input.Keyboard.JustDown(cursors.right)) {
+                ship1.setVelocityX(ship1.body.velocity.x + KEYBOARD_IMPULSE);
+            }
+
+            if (Phaser.Input.Keyboard.JustDown(cursors.up)) {
+                ship1.setVelocityY(ship1.body.velocity.y - KEYBOARD_IMPULSE);
+            }
+            else if (Phaser.Input.Keyboard.JustDown(cursors.down)) {
+                ship1.setVelocityY(ship1.body.velocity.y + KEYBOARD_IMPULSE);
+            }
         }
     </script>
 
