@@ -282,17 +282,31 @@ was reckless, the slower gets 3 points.
                 this.cameras.main.shake(200, 0.01);
                 this.particles.emitParticleAt((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 10);
 
+                // REWARD LOGIC: Slower player gets +3 points
+                const REWARD = 3;
+
                 if (speed1 > speed2) {
-                    const loss = Math.ceil(this.score1 / 2);
-                    this.score1 = Math.max(0, this.score1 - loss);
-                    this.scoreText1.setText('P1: ' + this.score1);
-                    this.showFloatingText(s1.x, s1.y, `-${loss}`, '#ff0044');
-                } else {
-                    const loss = Math.ceil(this.score2 / 2);
-                    this.score2 = Math.max(0, this.score2 - loss);
+                    // P1 is faster. P2 (slower) gets reward.
+                    this.score2 += REWARD;
                     this.scoreText2.setText('P2: ' + this.score2);
-                    this.showFloatingText(s2.x, s2.y, `-${loss}`, '#0088ff');
+
+                    // Visual Juice on P2 (Green tint for good)
+                    s2.setTint(0x00ff00);
+                    this.time.delayedCall(200, () => s2.clearTint());
+                    this.showFloatingText(s2.x, s2.y, `+${REWARD}`, '#00ff00');
+                } else {
+                    // P2 is faster. P1 (slower) gets reward.
+                    this.score1 += REWARD;
+                    this.scoreText1.setText('P1: ' + this.score1);
+
+                    // Visual Juice on P1 (Green tint for good)
+                    s1.setTint(0x00ff00);
+                    this.time.delayedCall(200, () => s1.clearTint());
+                    this.showFloatingText(s1.x, s1.y, `+${REWARD}`, '#00ff00');
                 }
+
+                // Gaining points can now cause a win, so we must check
+                this.checkWin();
             }
 
             showFloatingText(x, y, msg, color) {
