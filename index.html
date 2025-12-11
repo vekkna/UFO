@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STAR DRIFT v0.3.1</title>
+    <title>STAR DRIFT</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body {
@@ -168,18 +168,25 @@ was reckless, the slower gets 3 points.
                 this.ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex').setCircle(20);
 
                 [this.ship1, this.ship2].forEach(s => {
-                    // --- PHYSICS TWEAKS FOR CONTROL ---
-                    s.setDamping(false);
-                    s.setDrag(100); // Added Friction: Ships will stop on their own
+                    // --- SWITCHED TO DAMPING FOR SMOOTHER CONTROL ---
+                    // true = use damping (multiplicative)
+                    // false = use linear (subtractive)
+                    s.setDamping(true);
+
+                    // With damping, value is a multiplier (0 to 1).
+                    // 0.94 means "Retain 94% of speed every frame"
+                    // This creates a smooth slide that eliminates axis-drift
+                    s.setDrag(0.5);
+
                     s.setBounce(0.9);
-                    s.setMaxVelocity(400); // Reduced Max Speed: Prevents chaos
+                    s.setMaxVelocity(400);
                 });
             }
 
             setupAsteroids() {
                 this.asteroids = this.physics.add.group({ classType: Asteroid, runChildUpdate: true });
                 this.spawnEvent = this.time.addEvent({
-                    delay: 2000,
+                    delay: 3000,
                     callback: this.spawnAsteroid,
                     callbackScope: this,
                     loop: true
@@ -204,8 +211,7 @@ was reckless, the slower gets 3 points.
             }
 
             setupInput() {
-                // --- PHYSICS TWEAK FOR CONTROL ---
-                // Increased from 4 to 5 to compensate for the Drag
+                // Slightly higher impulse needed since damping kicks in immediately
                 const IMPULSE_MULTIPLIER = 5;
 
                 this.input.on('pointerup', (pointer) => {
@@ -375,7 +381,7 @@ was reckless, the slower gets 3 points.
             }
             setNextGrowth(scene) {
                 if (this.stage >= 3) return;
-                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 7000), () => this.grow());
+                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 8000), () => this.grow());
             }
             grow() {
                 if (!this.scene) return;
