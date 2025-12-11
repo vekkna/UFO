@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STAR DRIFT v0.2</title>
+    <title>STAR DRIFT v0.3</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body {
@@ -47,7 +47,6 @@
                 const w = this.scale.width;
                 const h = this.scale.height;
 
-                // Background Starfield (Static)
                 this.add.graphics()
                     .fillStyle(0xffffff, 0.1)
                     .fillCircle(w * 0.2, h * 0.2, 2)
@@ -55,42 +54,42 @@
                     .fillCircle(w * 0.1, h * 0.9, 1)
                     .fillCircle(w * 0.9, h * 0.1, 2);
 
-                // Title
                 this.add.text(w / 2, h * 0.2, 'STAR DRIFT', {
                     fontFamily: 'Orbitron', fontSize: '60px', fontWeight: '900', color: '#ffffff'
                 }).setOrigin(0.5);
 
-                // --- BUTTONS ---
                 this.createButton(w / 2, h * 0.45, 'PLAY GAME', 0x00ff00, () => this.scene.start('GameScene'));
                 this.createButton(w / 2, h * 0.6, 'RULES', 0x0088ff, () => this.toggleRules(true));
 
-                // --- RULES OVERLAY (Hidden by default) ---
                 this.rulesContainer = this.add.container(0, 0);
                 this.rulesContainer.setVisible(false);
                 this.rulesContainer.setDepth(200);
 
-                // Dark background for rules
                 const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9);
 
                 const rulesText = `
-30 points to win.
+MISSION:
+Collect 30 points to win.
 
-Swipe in your corner to move.
+CONTROLS:
+Swipe in your colored corner
+to move.
 
+SCORING:
 Rocks grow over time.
 Small Rock: 1 pt
 Med Rock: 2 pts
 Large Rock: 5 pts
 
+COLLISIONS:
 If ships crash, the FASTER ship
-was reckless, so the slower gets 3 points.
+was reckless, the slower gets 3 points.
         `;
 
                 const txt = this.add.text(w / 2, h / 2 - 50, rulesText, {
                     fontFamily: 'Orbitron', fontSize: '20px', color: '#ffffff', align: 'center', lineSpacing: 10
                 }).setOrigin(0.5);
 
-                // Close Button
                 const closeBtn = this.add.text(w / 2, h * 0.85, '[ CLOSE ]', {
                     fontFamily: 'Orbitron', fontSize: '30px', color: '#ff0044'
                 }).setOrigin(0.5).setInteractive();
@@ -106,7 +105,6 @@ was reckless, so the slower gets 3 points.
                     backgroundColor: '#222222', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setInteractive();
 
-                // Hover/Touch effects
                 btn.on('pointerover', () => btn.setStyle({ fill: '#ffff00' }));
                 btn.on('pointerout', () => btn.setStyle({ fill: '#ffffff' }));
                 btn.on('pointerdown', callback);
@@ -124,7 +122,6 @@ was reckless, so the slower gets 3 points.
                 super({ key: 'GameScene' });
             }
 
-            // Initialize variables per session
             create() {
                 this.score1 = 0;
                 this.score2 = 0;
@@ -133,16 +130,13 @@ was reckless, so the slower gets 3 points.
                 this.input.addPointer(2);
                 this.cursors = this.input.keyboard.createCursorKeys();
 
-                // Generate Graphics (We call this again to ensure context exists)
                 this.generateTextures();
 
-                // Particles
                 this.particles = this.add.particles(0, 0, 'spark', {
                     speed: { min: 50, max: 150 }, scale: { start: 1, end: 0 },
                     blendMode: 'ADD', lifespan: 300, emitting: false
                 });
 
-                // Setup Objects
                 this.setupShips();
                 this.setupAsteroids();
                 this.setupCollisions();
@@ -157,15 +151,12 @@ was reckless, so the slower gets 3 points.
                 this.physics.world.wrap(this.ship2, 20);
                 this.physics.world.wrap(this.asteroids, 60);
 
-                // Keyboard Debugging
                 const IMPULSE = 100;
                 if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) this.ship1.setVelocityX(this.ship1.body.velocity.x - IMPULSE);
                 if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.ship1.setVelocityX(this.ship1.body.velocity.x + IMPULSE);
                 if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) this.ship1.setVelocityY(this.ship1.body.velocity.y - IMPULSE);
                 if (Phaser.Input.Keyboard.JustDown(this.cursors.down)) this.ship1.setVelocityY(this.ship1.body.velocity.y + IMPULSE);
             }
-
-            // --- SETUP FUNCTIONS ---
 
             setupShips() {
                 const p1StartX = ZONE_SIZE / 2;
@@ -177,7 +168,11 @@ was reckless, so the slower gets 3 points.
                 this.ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex').setCircle(20);
 
                 [this.ship1, this.ship2].forEach(s => {
-                    s.setDamping(false).setDrag(0).setBounce(0.9).setMaxVelocity(600);
+                    // --- PHYSICS TWEAKS FOR CONTROL ---
+                    s.setDamping(false);
+                    s.setDrag(200); // Added Friction: Ships will stop on their own
+                    s.setBounce(0.9);
+                    s.setMaxVelocity(400); // Reduced Max Speed: Prevents chaos
                 });
             }
 
@@ -198,39 +193,35 @@ was reckless, so the slower gets 3 points.
             }
 
             setupUI() {
-                // Draw Zones
                 const zg = this.add.graphics();
                 zg.lineStyle(2, 0x444444, 0.3);
                 zg.strokeRect(0, this.scale.height - ZONE_SIZE, ZONE_SIZE, ZONE_SIZE);
                 zg.strokeRect(this.scale.width - ZONE_SIZE, 0, ZONE_SIZE, ZONE_SIZE);
 
                 const fontStyle = { fontFamily: 'Orbitron', fontSize: '32px', fontWeight: 'bold' };
-
-                // Ensure Depth is HIGH (100) so they never hide behind ships
                 this.scoreText1 = this.add.text(20, this.scale.height - 60, 'P1: 0', { ...fontStyle, color: '#ff0044' }).setDepth(100);
                 this.scoreText2 = this.add.text(this.scale.width - 180, 30, 'P2: 0', { ...fontStyle, color: '#0088ff' }).setDepth(100);
             }
 
             setupInput() {
-                const IMPULSE_MULTIPLIER = 4;
+                // --- PHYSICS TWEAK FOR CONTROL ---
+                // Increased from 4 to 5 to compensate for the Drag
+                const IMPULSE_MULTIPLIER = 5;
+
                 this.input.on('pointerup', (pointer) => {
                     if (this.isGameOver) return;
                     const vectorX = pointer.upX - pointer.downX;
                     const vectorY = pointer.upY - pointer.downY;
                     if (Math.abs(vectorX) < 5 && Math.abs(vectorY) < 5) return;
 
-                    // Player 1 Zone (Bottom Left)
                     if (pointer.downX < ZONE_SIZE && pointer.downY > this.scale.height - ZONE_SIZE) {
                         this.ship1.setVelocity(this.ship1.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), this.ship1.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
                     }
-                    // Player 2 Zone (Top Right)
                     else if (pointer.downX > this.scale.width - ZONE_SIZE && pointer.downY < ZONE_SIZE) {
                         this.ship2.setVelocity(this.ship2.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), this.ship2.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
                     }
                 });
             }
-
-            // --- GAMEPLAY LOGIC ---
 
             spawnAsteroid() {
                 if (this.isGameOver) return;
@@ -280,52 +271,28 @@ was reckless, so the slower gets 3 points.
                 const REWARD = 3;
 
                 if (speed1 > speed2) {
-                    // P1 is faster. P2 (slower) gets reward.
                     this.score2 += REWARD;
                     this.scoreText2.setText('P2: ' + this.score2);
-
-                    // Visuals for P2 Gain
-                    s2.setTint(0x00ff00); // Green Flash = Success
+                    s2.setTint(0x00ff00);
                     this.time.delayedCall(200, () => s2.clearTint());
-
-                    // Show Blue Text (+3) over P2
                     this.showFloatingText(s2.x, s2.y, `+${REWARD}`, '#0088ff');
-
-                    // Animate P2 Corner UI
                     this.animateScoreGain(this.scoreText2);
-
                 } else {
-                    // P2 is faster. P1 (slower) gets reward.
                     this.score1 += REWARD;
                     this.scoreText1.setText('P1: ' + this.score1);
-
-                    // Visuals for P1 Gain
                     s1.setTint(0x00ff00);
                     this.time.delayedCall(200, () => s1.clearTint());
-
-                    // Show Red Text (+3) over P1
                     this.showFloatingText(s1.x, s1.y, `+${REWARD}`, '#ff0044');
-
-                    // Animate P1 Corner UI
                     this.animateScoreGain(this.scoreText1);
                 }
 
                 this.checkWin();
             }
 
-            // NEW: Function to make the corner score pop and flash
             animateScoreGain(textObj) {
-                // Scale Tween
                 this.tweens.add({
-                    targets: textObj,
-                    scaleX: 1.5,
-                    scaleY: 1.5,
-                    duration: 100,
-                    yoyo: true,
-                    ease: 'Back.Out'
+                    targets: textObj, scaleX: 1.5, scaleY: 1.5, duration: 100, yoyo: true, ease: 'Back.Out'
                 });
-
-                // Color Flash (Green tint to show positive gain)
                 textObj.setTint(0x00ff00);
                 this.time.delayedCall(300, () => textObj.clearTint());
             }
@@ -339,25 +306,16 @@ was reckless, so the slower gets 3 points.
                 if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
                     this.isGameOver = true;
                     this.physics.pause();
-
-                    // --- DRAW GAME OVER OVERLAY ---
-                    // 1. Semi-transparent black background
                     const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.8);
                     overlay.setDepth(200);
-
-                    // 2. Winner Text
                     const winner = this.score1 >= WIN_SCORE ? "PLAYER 1" : "PLAYER 2";
                     const color = this.score1 >= WIN_SCORE ? "#ff0044" : "#0088ff";
-
-                    const winText = this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, `${winner} WINS!`, {
+                    this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, `${winner} WINS!`, {
                         fontFamily: 'Orbitron', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
                     }).setOrigin(0.5).setDepth(201);
-
-                    // 3. Restart Button
                     const btn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 80, 'MAIN MENU', {
                         fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
                     }).setOrigin(0.5).setDepth(201).setInteractive();
-
                     btn.on('pointerdown', () => {
                         this.scene.start('MainMenu');
                     });
@@ -365,9 +323,7 @@ was reckless, so the slower gets 3 points.
             }
 
             generateTextures() {
-                if (this.textures.exists('ship1_tex')) return; // Don't regenerate if they exist
-
-                // P1 Ship
+                if (this.textures.exists('ship1_tex')) return;
                 const g1 = this.make.graphics();
                 g1.fillStyle(0xff0044); g1.fillEllipse(20, 20, 40, 40);
                 g1.fillStyle(0xffffff); g1.fillCircle(20, 20, 12);
@@ -375,7 +331,6 @@ was reckless, so the slower gets 3 points.
                 [[20, 5], [20, 35], [5, 20], [35, 20]].forEach(p => g1.fillCircle(p[0], p[1], 3));
                 g1.generateTexture('ship1_tex', 40, 40);
 
-                // P2 Ship
                 const g2 = this.make.graphics();
                 g2.fillStyle(0x0088ff); g2.fillEllipse(20, 20, 40, 40);
                 g2.fillStyle(0xffffff); g2.fillCircle(20, 20, 12);
@@ -383,7 +338,6 @@ was reckless, so the slower gets 3 points.
                 [[20, 5], [20, 35], [5, 20], [35, 20]].forEach(p => g2.fillCircle(p[0], p[1], 3));
                 g2.generateTexture('ship2_tex', 40, 40);
 
-                // Rocks
                 [['asteroid_small', 0x888888, 12], ['asteroid_med', 0xaaaaaa, 22], ['asteroid_large', 0xcccccc, 45]].forEach(data => {
                     const g = this.make.graphics();
                     g.fillStyle(data[1]);
@@ -397,14 +351,12 @@ was reckless, so the slower gets 3 points.
                     g.generateTexture(data[0], data[2] * 2.5, data[2] * 2.5);
                 });
 
-                // Spark
                 const gs = this.make.graphics();
                 gs.fillStyle(0xffffff); gs.fillCircle(4, 4, 4);
                 gs.generateTexture('spark', 8, 8);
             }
         }
 
-        // --- ASTEROID CLASS (Same logic as before, moved outside GameScene for cleanliness) ---
         class Asteroid extends Phaser.Physics.Arcade.Sprite {
             constructor(scene, x, y) {
                 super(scene, x, y, 'asteroid_small');
@@ -445,7 +397,7 @@ was reckless, so the slower gets 3 points.
             width: window.innerWidth,
             height: window.innerHeight,
             backgroundColor: '#050505',
-            pixelArt: true, // <--- Add this for crisp edges in 3.90+
+            pixelArt: true,
             physics: {
                 default: 'arcade',
                 arcade: { gravity: { x: 0, y: 0 }, debug: false }
