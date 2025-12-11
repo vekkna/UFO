@@ -88,7 +88,7 @@ Large Rock: 5 pts
 
 COLLISIONS:
 If ships crash, the FASTER ship
-was reckless and loses half its points.
+was reckless, the slower gets 3 points.
         `;
 
                 const txt = this.add.text(w / 2, h / 2 - 50, rulesText, {
@@ -163,7 +163,7 @@ was reckless and loses half its points.
                 this.physics.world.wrap(this.asteroids, 60);
 
                 // Keyboard Debugging
-                const IMPULSE = 300;
+                const IMPULSE = 100;
                 if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) this.ship1.setVelocityX(this.ship1.body.velocity.x - IMPULSE);
                 if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.ship1.setVelocityX(this.ship1.body.velocity.x + IMPULSE);
                 if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) this.ship1.setVelocityY(this.ship1.body.velocity.y - IMPULSE);
@@ -189,7 +189,7 @@ was reckless and loses half its points.
             setupAsteroids() {
                 this.asteroids = this.physics.add.group({ classType: Asteroid, runChildUpdate: true });
                 this.spawnEvent = this.time.addEvent({
-                    delay: 4000,
+                    delay: 3000,
                     callback: this.spawnAsteroid,
                     callbackScope: this,
                     loop: true
@@ -388,7 +388,7 @@ was reckless and loses half its points.
             }
             setNextGrowth(scene) {
                 if (this.stage >= 3) return;
-                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(5000, 10000), () => this.grow());
+                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 8000), () => this.grow());
             }
             grow() {
                 if (!this.scene) return;
