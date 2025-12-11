@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>UFO Battle - Scenes</title>
+    <title>STAR DRIFT</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body {
@@ -25,7 +25,7 @@
             font-weight: 700;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
 </head>
 
 <body>
@@ -56,7 +56,7 @@
                     .fillCircle(w * 0.9, h * 0.1, 2);
 
                 // Title
-                this.add.text(w / 2, h * 0.2, 'NEON DRIFT', {
+                this.add.text(w / 2, h * 0.2, 'STAR DRIFT', {
                     fontFamily: 'Orbitron', fontSize: '60px', fontWeight: '900', color: '#ffffff'
                 }).setOrigin(0.5);
 
@@ -410,7 +410,11 @@ was reckless and loses half its points.
             width: window.innerWidth,
             height: window.innerHeight,
             backgroundColor: '#050505',
-            physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
+            pixelArt: true, // <--- Add this for crisp edges in 3.90+
+            physics: {
+                default: 'arcade',
+                arcade: { gravity: { x: 0, y: 0 }, debug: false }
+            },
             scene: [MainMenu, GameScene]
         };
 
