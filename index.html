@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STAR DRIFT v0.3</title>
+    <title>STAR DRIFT v0.3.1</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body {
@@ -170,7 +170,7 @@ was reckless, the slower gets 3 points.
                 [this.ship1, this.ship2].forEach(s => {
                     // --- PHYSICS TWEAKS FOR CONTROL ---
                     s.setDamping(false);
-                    s.setDrag(200); // Added Friction: Ships will stop on their own
+                    s.setDrag(100); // Added Friction: Ships will stop on their own
                     s.setBounce(0.9);
                     s.setMaxVelocity(400); // Reduced Max Speed: Prevents chaos
                 });
@@ -179,7 +179,7 @@ was reckless, the slower gets 3 points.
             setupAsteroids() {
                 this.asteroids = this.physics.add.group({ classType: Asteroid, runChildUpdate: true });
                 this.spawnEvent = this.time.addEvent({
-                    delay: 3000,
+                    delay: 2000,
                     callback: this.spawnAsteroid,
                     callbackScope: this,
                     loop: true
@@ -375,7 +375,7 @@ was reckless, the slower gets 3 points.
             }
             setNextGrowth(scene) {
                 if (this.stage >= 3) return;
-                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 8000), () => this.grow());
+                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 7000), () => this.grow());
             }
             grow() {
                 if (!this.scene) return;
