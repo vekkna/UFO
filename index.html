@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STAR DRIFT v0.1</title>
+    <title>STAR DRIFT v0.2</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body {
@@ -73,22 +73,17 @@
                 const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9);
 
                 const rulesText = `
-MISSION:
-Collect 30 points to win.
+30 points to win.
 
-CONTROLS:
-Swipe in your colored corner
-to move.
+Swipe in your corner to move.
 
-SCORING:
 Rocks grow over time.
 Small Rock: 1 pt
 Med Rock: 2 pts
 Large Rock: 5 pts
 
-COLLISIONS:
 If ships crash, the FASTER ship
-was reckless, the slower gets 3 points.
+was reckless, so the slower gets 3 points.
         `;
 
                 const txt = this.add.text(w / 2, h / 2 - 50, rulesText, {
@@ -282,7 +277,6 @@ was reckless, the slower gets 3 points.
                 this.cameras.main.shake(200, 0.01);
                 this.particles.emitParticleAt((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 10);
 
-                // REWARD LOGIC: Slower player gets +3 points
                 const REWARD = 3;
 
                 if (speed1 > speed2) {
@@ -290,23 +284,50 @@ was reckless, the slower gets 3 points.
                     this.score2 += REWARD;
                     this.scoreText2.setText('P2: ' + this.score2);
 
-                    // Visual Juice on P2 (Green tint for good)
-                    s2.setTint(0x00ff00);
+                    // Visuals for P2 Gain
+                    s2.setTint(0x00ff00); // Green Flash = Success
                     this.time.delayedCall(200, () => s2.clearTint());
-                    this.showFloatingText(s2.x, s2.y, `+${REWARD}`, '#00ff00');
+
+                    // Show Blue Text (+3) over P2
+                    this.showFloatingText(s2.x, s2.y, `+${REWARD}`, '#0088ff');
+
+                    // Animate P2 Corner UI
+                    this.animateScoreGain(this.scoreText2);
+
                 } else {
                     // P2 is faster. P1 (slower) gets reward.
                     this.score1 += REWARD;
                     this.scoreText1.setText('P1: ' + this.score1);
 
-                    // Visual Juice on P1 (Green tint for good)
+                    // Visuals for P1 Gain
                     s1.setTint(0x00ff00);
                     this.time.delayedCall(200, () => s1.clearTint());
-                    this.showFloatingText(s1.x, s1.y, `+${REWARD}`, '#00ff00');
+
+                    // Show Red Text (+3) over P1
+                    this.showFloatingText(s1.x, s1.y, `+${REWARD}`, '#ff0044');
+
+                    // Animate P1 Corner UI
+                    this.animateScoreGain(this.scoreText1);
                 }
 
-                // Gaining points can now cause a win, so we must check
                 this.checkWin();
+            }
+
+            // NEW: Function to make the corner score pop and flash
+            animateScoreGain(textObj) {
+                // Scale Tween
+                this.tweens.add({
+                    targets: textObj,
+                    scaleX: 1.5,
+                    scaleY: 1.5,
+                    duration: 100,
+                    yoyo: true,
+                    ease: 'Back.Out'
+                });
+
+                // Color Flash (Green tint to show positive gain)
+                textObj.setTint(0x00ff00);
+                this.time.delayedCall(300, () => textObj.clearTint());
             }
 
             showFloatingText(x, y, msg, color) {
