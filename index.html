@@ -4,10 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STAR DRIFT 0.7.2</title>
+    <title>STAR DRIFT: NETLINK</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        /* CHANGED: Background is now Dark Grey so the Black game canvas stands out */
         body {
             margin: 0;
             background: #222222;
@@ -27,6 +27,35 @@
             font-family: 'Orbitron';
             font-weight: 700;
         }
+
+        /* HTML UI Overlay for Lobby */
+        #lobby-ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            /* Let clicks pass through to Phaser usually, but we will toggle pointer events for inputs */
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 1000;
+        }
+
+        input {
+            font-family: 'Orbitron';
+            font-size: 24px;
+            padding: 10px;
+            text-align: center;
+            text-transform: uppercase;
+            background: #000;
+            color: #0088ff;
+            border: 2px solid #0088ff;
+            margin-bottom: 20px;
+            pointer-events: auto;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
 </head>
@@ -35,6 +64,10 @@
 
     <div class="font-loader">.</div>
 
+    <div id="lobby-ui">
+        <input type="text" id="join-code" maxlength="3" placeholder="ENTER 3-CHAR CODE">
+    </div>
+
     <script>
         // --- GLOBAL CONFIG ---
         const LOGICAL_WIDTH = 540;
@@ -42,64 +75,100 @@
         const ZONE_SIZE = 200;
         const WIN_SCORE = 30;
 
-        // --- AI CONTROLLER CLASS ---
+        // --- NETWORK MANAGER ---
+        class NetworkMgr {
+            constructor() {
+                this.peer = null;
+                this.conn = null;
+                this.role = 'offline'; // 'host', 'client', 'offline'
+                this.myId = '';
+                this.onData = null;
+                this.onConnect = null;
+            }
+
+            init(id = null) {
+                // We prefix to avoid collisions with other random PeerJS users
+                const peerId = id ? `sd-${id}` : null;
+                this.peer = new Peer(peerId);
+
+                this.peer.on('open', (id) => {
+                    this.myId = id.replace('sd-', '');
+                    console.log('My ID:', this.myId);
+                });
+
+                this.peer.on('connection', (conn) => {
+                    if (this.conn) { conn.close(); return; } // Limit to 1 player
+                    this.conn = conn;
+                    this.setupConnEvents();
+                    if (this.onConnect) this.onConnect();
+                });
+
+                this.peer.on('error', (err) => console.error(err));
+            }
+
+            connect(hostId) {
+                this.conn = this.peer.connect(`sd-${hostId}`);
+                this.setupConnEvents();
+            }
+
+            setupConnEvents() {
+                this.conn.on('open', () => {
+                    console.log('Connected to peer');
+                    if (this.role === 'client' && this.onConnect) this.onConnect();
+                });
+                this.conn.on('data', (data) => {
+                    if (this.onData) this.onData(data);
+                });
+                this.conn.on('close', () => {
+                    console.log('Connection closed');
+                    window.location.reload(); // Simple reset on disconnect
+                });
+            }
+
+            send(data) {
+                if (this.conn && this.conn.open) {
+                    this.conn.send(data);
+                }
+            }
+        }
+
+        const net = new NetworkMgr();
+
+        // --- AI CONTROLLER (Unchanged logic, just context aware) ---
         class BotController {
             constructor(scene, ship, opponent, asteroids) {
                 this.scene = scene;
                 this.ship = ship;
                 this.opponent = opponent;
                 this.asteroids = asteroids;
-
-                // Base Personality
                 this.baseWeights = { greed: 1.0, aggression: 0.1 };
                 this.currentWeights = { ...this.baseWeights };
-
                 this.MAX_ACCEL = 600;
             }
 
             update() {
-                // 1. SCORE ADAPTATION
-                const myScore = this.scene.isSinglePlayer ? this.scene.score2 : 0;
+                const myScore = this.scene.score2;
                 const pScore = this.scene.score1;
                 const scoreDiff = myScore - pScore;
 
-                if (scoreDiff > 5) { // Winning: Play Safe
-                    this.currentWeights.aggression = 0.0;
-                    this.currentWeights.greed = 0.8;
-                } else if (scoreDiff < -5) { // Losing: Risk it
-                    this.currentWeights.aggression = 0.6;
-                    this.currentWeights.greed = 1.2;
-                } else { // Close: Balanced
-                    this.currentWeights.aggression = 0.1;
-                    this.currentWeights.greed = 1.0;
-                }
+                if (scoreDiff > 5) { this.currentWeights.aggression = 0.0; this.currentWeights.greed = 0.8; }
+                else if (scoreDiff < -5) { this.currentWeights.aggression = 0.6; this.currentWeights.greed = 1.2; }
+                else { this.currentWeights.aggression = 0.1; this.currentWeights.greed = 1.0; }
 
                 const desires = [];
                 const pSpeed = this.opponent.body.speed;
                 const mySpeed = this.ship.body.speed;
                 const distToPlayer = this.getToroidalDistance(this.ship.x, this.ship.y, this.opponent.x, this.opponent.y);
 
-                // --- CRITICAL SAFETY OVERRIDE (The Speed Governor) ---
-                // If we are getting close (250px), NEVER be faster than the opponent.
-                // This prevents accidental crashes where we give them points.
-                let speedLimit = 400; // Default max speed
+                let speedLimit = 400;
                 if (distToPlayer < 250) {
-                    // If we are faster, clamp our max capability to be slightly slower than them
-                    if (mySpeed > pSpeed) {
-                        speedLimit = Math.max(0, pSpeed - 30);
-                    }
+                    if (mySpeed > pSpeed) { speedLimit = Math.max(0, pSpeed - 30); }
                 }
 
-                // --- BEHAVIOR 1: COLLISION LOGIC ---
-                // Only fight if we are losing or it's a guaranteed win
                 if (distToPlayer < 140 && this.isMovingTowards(this.ship, this.opponent)) {
                     if (mySpeed > pSpeed) {
-                        // We are faster (we lose). 
-                        // Since we have the Governor above, this is now a "Panic" state 
-                        // if the Governor failed (e.g. they braked hard).
                         desires.push({ type: 'EVADE', score: 100000, target: this.opponent });
                     } else {
-                        // We are slower (we win). Ram them if aggressive.
                         let ramScore = 3000 * this.currentWeights.aggression;
                         desires.push({
                             type: 'INTERCEPT', score: ramScore, target: this.opponent,
@@ -108,22 +177,17 @@
                     }
                 }
 
-                // --- BEHAVIOR 2: HUNT ROCKS ---
                 this.asteroids.getChildren().forEach(rock => {
                     if (!rock.active) return;
-
                     const rawDist = Phaser.Math.Distance.Between(this.ship.x, this.ship.y, rock.x, rock.y);
                     const timeToHit = rawDist / 200;
                     let futureRockX = rock.x + (rock.body.velocity.x * timeToHit);
                     let futureRockY = rock.y + (rock.body.velocity.y * timeToHit);
-
                     const w = this.scene.scale.width; const h = this.scene.scale.height;
                     if (futureRockX < 0) futureRockX += w; if (futureRockX > w) futureRockX -= w;
                     if (futureRockY < 0) futureRockY += h; if (futureRockY > h) futureRockY -= h;
 
                     const dist = this.getToroidalDistance(this.ship.x, this.ship.y, futureRockX, futureRockY);
-
-                    // MOMENTUM CHECK
                     let angleCost = 0;
                     if (this.ship.body.speed > 50) {
                         const angleToTarget = Phaser.Math.Angle.Between(this.ship.x, this.ship.y, futureRockX, futureRockY);
@@ -131,36 +195,21 @@
                         let diff = Math.abs(Phaser.Math.Angle.Wrap(angleToTarget - currentAngle));
                         angleCost = diff * 150;
                     }
-
                     let value = Math.pow(rock.points, 3);
                     let score = ((value * 2000) / (dist + angleCost + 10));
                     score *= this.currentWeights.greed;
-
-                    desires.push({
-                        type: 'COLLECT', target: rock, score: score,
-                        position: { x: futureRockX, y: futureRockY },
-                        isBig: rock.points >= 5
-                    });
+                    desires.push({ type: 'COLLECT', target: rock, score: score, position: { x: futureRockX, y: futureRockY }, isBig: rock.points >= 5 });
                 });
 
-                // --- BEHAVIOR 3: CENTER CONTROL ---
-                desires.push({
-                    type: 'CENTER', score: 50,
-                    position: { x: this.scene.scale.width / 2, y: this.scene.scale.height / 2 }
-                });
-
-                // --- EXECUTE ---
+                desires.push({ type: 'CENTER', score: 50, position: { x: this.scene.scale.width / 2, y: this.scene.scale.height / 2 } });
                 desires.sort((a, b) => b.score - a.score);
                 const bestDesire = desires[0];
 
                 if (bestDesire.type === 'EVADE') {
-                    // TANGENTIAL EVASION: Don't turn around, turn 90 degrees. It's faster.
                     const angleToOpponent = Phaser.Math.Angle.Between(this.ship.x, this.ship.y, this.opponent.x, this.opponent.y);
-                    // Add 90 degrees (PI/2) to side-step the crash
                     this.scene.physics.velocityFromRotation(angleToOpponent + 1.57, 400, this.ship.body.acceleration);
                 }
                 else if (bestDesire.type === 'COLLECT' || bestDesire.type === 'CENTER') {
-                    // Apply the speed limit from the Governor
                     const limit = bestDesire.isBig ? 400 : speedLimit;
                     this.applySteeringForce(bestDesire.position.x, bestDesire.position.y, limit);
                 }
@@ -173,42 +222,26 @@
                 const ship = this.ship;
                 let targetX = tx; let targetY = ty;
                 const w = this.scene.scale.width; const h = this.scene.scale.height;
-
-                if (targetX - ship.x > w / 2) targetX -= w;
-                else if (targetX - ship.x < -w / 2) targetX += w;
-                if (targetY - ship.y > h / 2) targetY -= h;
-                else if (targetY - ship.y < -h / 2) targetY += h;
-
-                let desiredX = targetX - ship.x;
-                let desiredY = targetY - ship.y;
+                if (targetX - ship.x > w / 2) targetX -= w; else if (targetX - ship.x < -w / 2) targetX += w;
+                if (targetY - ship.y > h / 2) targetY -= h; else if (targetY - ship.y < -h / 2) targetY += h;
+                let desiredX = targetX - ship.x; let desiredY = targetY - ship.y;
                 const length = Math.sqrt(desiredX * desiredX + desiredY * desiredY);
-                if (length > 0) {
-                    desiredX = (desiredX / length) * maxSpeed;
-                    desiredY = (desiredY / length) * maxSpeed;
-                }
-
-                let steerX = desiredX - ship.body.velocity.x;
-                let steerY = desiredY - ship.body.velocity.y;
+                if (length > 0) { desiredX = (desiredX / length) * maxSpeed; desiredY = (desiredY / length) * maxSpeed; }
+                let steerX = desiredX - ship.body.velocity.x; let steerY = desiredY - ship.body.velocity.y;
                 const steerLen = Math.sqrt(steerX * steerX + steerY * steerY);
-                if (steerLen > this.MAX_ACCEL) {
-                    steerX = (steerX / steerLen) * this.MAX_ACCEL;
-                    steerY = (steerY / steerLen) * this.MAX_ACCEL;
-                }
-
+                if (steerLen > this.MAX_ACCEL) { steerX = (steerX / steerLen) * this.MAX_ACCEL; steerY = (steerY / steerLen) * this.MAX_ACCEL; }
                 ship.setAcceleration(steerX, steerY);
             }
 
             getToroidalDistance(x1, y1, x2, y2) {
-                let dx = Math.abs(x1 - x2);
-                let dy = Math.abs(y1 - y2);
+                let dx = Math.abs(x1 - x2); let dy = Math.abs(y1 - y2);
                 if (dx > this.scene.scale.width / 2) dx = this.scene.scale.width - dx;
                 if (dy > this.scene.scale.height / 2) dy = this.scene.scale.height - dy;
                 return Math.sqrt(dx * dx + dy * dy);
             }
 
             isMovingTowards(source, target) {
-                const toTargetX = target.x - source.x;
-                const toTargetY = target.y - source.y;
+                const toTargetX = target.x - source.x; const toTargetY = target.y - source.y;
                 return ((source.body.velocity.x * toTargetX) + (source.body.velocity.y * toTargetY)) > 0;
             }
         }
@@ -221,52 +254,35 @@
                 const w = this.scale.width;
                 const h = this.scale.height;
 
-                // Draw Board Border
+                // Reset Net UI
+                document.getElementById('lobby-ui').style.display = 'none';
+
                 const border = this.add.graphics();
                 border.lineStyle(4, 0x333333);
                 border.strokeRect(0, 0, w, h);
 
-                this.add.graphics()
-                    .fillStyle(0xffffff, 0.1).fillCircle(w * 0.2, h * 0.2, 2).fillCircle(w * 0.8, h * 0.8, 3)
-                    .fillCircle(w * 0.1, h * 0.9, 1).fillCircle(w * 0.9, h * 0.1, 2);
-
-                this.add.text(w / 2, h * 0.2, 'STAR DRIFT', {
+                this.add.text(w / 2, h * 0.15, 'STAR DRIFT', {
                     fontFamily: 'Orbitron', fontSize: '60px', fontWeight: '900', color: '#ffffff'
                 }).setOrigin(0.5);
 
-                this.createButton(w / 2, h * 0.45, '1 PLAYER (VS AI)', 0xff0044, () => this.scene.start('GameScene', { isSinglePlayer: true }));
-                this.createButton(w / 2, h * 0.55, '2 PLAYERS', 0x0088ff, () => this.scene.start('GameScene', { isSinglePlayer: false }));
-                this.createButton(w / 2, h * 0.7, 'RULES', 0xaaaaaa, () => this.toggleRules(true));
+                // Button helpers
+                const btnY = (offset) => h * 0.4 + (offset * 80);
 
-                this.rulesContainer = this.add.container(0, 0);
-                this.rulesContainer.setVisible(false).setDepth(200);
+                // 1. Single Player
+                this.createButton(w / 2, btnY(0), '1 PLAYER (VS AI)', 0xff0044, () => {
+                    net.role = 'offline';
+                    this.scene.start('GameScene');
+                });
 
-                const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9);
-                const rulesText = `
-MISSION:
-Collect 30 points.
-Red vs Blue.
+                // 2. Host Game
+                this.createButton(w / 2, btnY(1), 'HOST GAME', 0x0088ff, () => {
+                    this.startHostSequence();
+                });
 
-CONTROLS (1P):
-Swipe Bottom Left to move.
-
-SCORING:
-Small Rock: 1 pt | Med: 2 pts | Lrg: 5 pts
-
-COLLISIONS:
-If ships crash, the FASTER ship was reckless.
-The slower ship gets 3 points.
-        `;
-                const txt = this.add.text(w / 2, h / 2 - 50, rulesText, {
-                    fontFamily: 'Orbitron', fontSize: '20px', color: '#ffffff', align: 'center', lineSpacing: 10
-                }).setOrigin(0.5);
-
-                const closeBtn = this.add.text(w / 2, h * 0.85, '[ CLOSE ]', {
-                    fontFamily: 'Orbitron', fontSize: '30px', color: '#ff0044'
-                }).setOrigin(0.5).setInteractive();
-
-                closeBtn.on('pointerdown', () => this.toggleRules(false));
-                this.rulesContainer.add([bg, txt, closeBtn]);
+                // 3. Join Game
+                this.createButton(w / 2, btnY(2), 'JOIN GAME', 0x00ff88, () => {
+                    this.startJoinSequence();
+                });
             }
 
             createButton(x, y, text, color, callback) {
@@ -274,23 +290,72 @@ The slower ship gets 3 points.
                     fontFamily: 'Orbitron', fontSize: '30px', fontWeight: 'bold', color: '#ffffff',
                     backgroundColor: '#222222', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setInteractive();
-
-                btn.on('pointerover', () => btn.setStyle({ fill: '#ffff00' }));
-                btn.on('pointerout', () => btn.setStyle({ fill: '#ffffff' }));
                 btn.on('pointerdown', callback);
             }
-            toggleRules(show) { this.rulesContainer.setVisible(show); }
+
+            startHostSequence() {
+                // Generate 3 random chars
+                const code = Math.random().toString(36).substring(2, 5).toUpperCase();
+                net.role = 'host';
+                net.init(code);
+
+                const w = this.scale.width; const h = this.scale.height;
+                const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9).setInteractive();
+
+                const txt = this.add.text(w / 2, h / 2, `WAITING FOR P2...\n\nCODE: ${code}`, {
+                    fontFamily: 'Orbitron', fontSize: '30px', align: 'center', color: '#0088ff'
+                }).setOrigin(0.5);
+
+                net.onConnect = () => {
+                    this.scene.start('GameScene');
+                };
+            }
+
+            startJoinSequence() {
+                net.role = 'client';
+                net.init(); // Init with auto ID
+
+                const w = this.scale.width; const h = this.scale.height;
+                const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9).setInteractive();
+
+                const ui = document.getElementById('lobby-ui');
+                ui.style.display = 'flex';
+                const input = document.getElementById('join-code');
+                input.value = '';
+                input.focus();
+
+                this.add.text(w / 2, h * 0.3, 'ENTER HOST CODE:', {
+                    fontFamily: 'Orbitron', fontSize: '24px', color: '#00ff88'
+                }).setOrigin(0.5);
+
+                // Add a "GO" button in Phaser to click after typing
+                const goBtn = this.add.text(w / 2, h * 0.6, '[ CONNECT ]', {
+                    fontFamily: 'Orbitron', fontSize: '30px', color: '#ffffff', backgroundColor: '#004400', padding: 10
+                }).setOrigin(0.5).setInteractive();
+
+                goBtn.on('pointerdown', () => {
+                    const code = input.value.toUpperCase();
+                    if (code.length === 3) {
+                        ui.style.display = 'none';
+                        txt.setText("CONNECTING...");
+                        net.connect(code);
+                    }
+                });
+
+                const txt = this.add.text(w / 2, h * 0.5, '', { fontFamily: 'Orbitron', fontSize: '20px' }).setOrigin(0.5);
+
+                net.onConnect = () => {
+                    this.scene.start('GameScene');
+                };
+            }
         }
 
         // --- SCENE 2: THE GAME ---
         class GameScene extends Phaser.Scene {
             constructor() { super({ key: 'GameScene' }); }
 
-            init(data) { this.isSinglePlayer = data.isSinglePlayer || false; }
-
             create() {
                 this.score1 = 0; this.score2 = 0; this.isGameOver = false;
-                this.cursors = this.input.keyboard.createCursorKeys();
 
                 this.generateTextures();
                 this.particles = this.add.particles(0, 0, 'spark', {
@@ -299,40 +364,60 @@ The slower ship gets 3 points.
                 });
 
                 this.setupShips();
-                this.setupAsteroids();
-                this.setupCollisions();
+                // Client does not generate asteroids, it receives them
+                this.asteroids = this.physics.add.group({ classType: Asteroid, runChildUpdate: true });
+
+                if (net.role !== 'client') {
+                    this.spawnEvent = this.time.addEvent({
+                        delay: 2000, callback: this.spawnAsteroid, callbackScope: this, loop: true
+                    });
+                }
+
                 this.setupUI();
 
+                // HOST/OFFLINE Logic
+                if (net.role !== 'client') {
+                    this.setupCollisions();
+                    if (net.role === 'offline') {
+                        this.bot = new BotController(this, this.ship2, this.ship1, this.asteroids);
+                        this.scoreText2.setText('CPU: 0');
+                    } else {
+                        this.scoreText2.setText('P2: 0');
+                    }
+                } else {
+                    // CLIENT Logic
+                    this.scoreText2.setText('P2: 0');
+                    // Disable physics body updates for Client (pure renderer)
+                    this.ship1.body.moves = false;
+                    this.ship2.body.moves = false;
+                }
+
+                // Global Input (Swipe anywhere)
                 this.input.on('pointerup', (pointer) => this.handleInput(pointer));
 
-                if (this.isSinglePlayer) {
-                    this.bot = new BotController(this, this.ship2, this.ship1, this.asteroids);
-                    this.scoreText2.setText('CPU: 0');
-                } else {
-                    this.scoreText2.setText('P2: 0');
-                }
+                // Network Data Handlers
+                net.onData = (data) => this.handleNetworkData(data);
             }
 
             update() {
                 if (this.isGameOver) return;
 
+                if (net.role === 'client') {
+                    // CLIENT: Just rendering, no logic
+                    return;
+                }
+
+                // HOST/OFFLINE: Run Physics
                 this.physics.world.wrap(this.ship1, 20);
                 this.physics.world.wrap(this.ship2, 20);
                 this.physics.world.wrap(this.asteroids, 60);
 
-                if (this.isSinglePlayer && this.bot) {
-                    this.bot.update();
+                if (this.bot) this.bot.update();
+
+                // Broadcast State if Host
+                if (net.role === 'host') {
+                    this.broadcastState();
                 }
-
-                // Keyboard for P1
-                const IMPULSE = 300;
-                if (this.cursors.left.isDown) this.ship1.setAccelerationX(-IMPULSE);
-                else if (this.cursors.right.isDown) this.ship1.setAccelerationX(IMPULSE);
-                else this.ship1.setAccelerationX(0);
-
-                if (this.cursors.up.isDown) this.ship1.setAccelerationY(-IMPULSE);
-                else if (this.cursors.down.isDown) this.ship1.setAccelerationY(IMPULSE);
-                else this.ship1.setAccelerationY(0);
             }
 
             setupShips() {
@@ -349,13 +434,6 @@ The slower ship gets 3 points.
                 });
             }
 
-            setupAsteroids() {
-                this.asteroids = this.physics.add.group({ classType: Asteroid, runChildUpdate: true });
-                this.spawnEvent = this.time.addEvent({
-                    delay: 2000, callback: this.spawnAsteroid, callbackScope: this, loop: true
-                });
-            }
-
             setupCollisions() {
                 this.physics.add.collider(this.ship1, this.ship2, this.handlePvpCollision, null, this);
                 this.physics.add.overlap(this.ship1, this.asteroids, (s, a) => this.collectAsteroid(s, a, 1), null, this);
@@ -364,19 +442,8 @@ The slower ship gets 3 points.
 
             setupUI() {
                 const zg = this.add.graphics();
-
-                // --- VISIBLE GAME BORDER ---
-                // Draw a thick grey line around the edge of the screen so you can see where "Space" ends
                 zg.lineStyle(4, 0x333333);
                 zg.strokeRect(0, 0, this.scale.width, this.scale.height);
-
-                // --- ZONES ---
-                zg.lineStyle(2, 0x444444, 0.3);
-                zg.strokeRect(0, this.scale.height - ZONE_SIZE, ZONE_SIZE, ZONE_SIZE);
-
-                if (!this.isSinglePlayer) {
-                    zg.strokeRect(this.scale.width - ZONE_SIZE, 0, ZONE_SIZE, ZONE_SIZE);
-                }
 
                 const fontStyle = { fontFamily: 'Orbitron', fontSize: '32px', fontWeight: 'bold' };
                 this.scoreText1 = this.add.text(20, this.scale.height - 60, 'P1: 0', { ...fontStyle, color: '#ff0044' }).setDepth(100);
@@ -389,15 +456,85 @@ The slower ship gets 3 points.
                 const vectorY = pointer.upY - pointer.downY;
                 if (Math.abs(vectorX) < 5 && Math.abs(vectorY) < 5) return;
 
-                const IMPULSE_MULTIPLIER = 5;
+                const IMPULSE = 5;
 
-                if (pointer.downX < ZONE_SIZE && pointer.downY > this.scale.height - ZONE_SIZE) {
-                    this.ship1.setVelocity(this.ship1.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), this.ship1.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
+                // Input Logic based on Role
+                if (net.role === 'offline') {
+                    // Controls P1
+                    this.applyImpulse(this.ship1, vectorX, vectorY, IMPULSE);
                 }
+                else if (net.role === 'host') {
+                    // Host controls P1 locally
+                    this.applyImpulse(this.ship1, vectorX, vectorY, IMPULSE);
+                }
+                else if (net.role === 'client') {
+                    // Client sends vector to Host
+                    net.send({ type: 'INPUT', x: vectorX, y: vectorY });
+                }
+            }
 
-                if (!this.isSinglePlayer) {
-                    if (pointer.downX > this.scale.width - ZONE_SIZE && pointer.downY < ZONE_SIZE) {
-                        this.ship2.setVelocity(this.ship2.body.velocity.x + (vectorX * IMPULSE_MULTIPLIER), this.ship2.body.velocity.y + (vectorY * IMPULSE_MULTIPLIER));
+            applyImpulse(ship, vx, vy, mult) {
+                ship.setVelocity(ship.body.velocity.x + (vx * mult), ship.body.velocity.y + (vy * mult));
+            }
+
+            broadcastState() {
+                // Send simplified representation of game
+                const asteroidData = [];
+                this.asteroids.getChildren().forEach(a => {
+                    if (a.active) asteroidData.push({ x: Math.round(a.x), y: Math.round(a.y), t: a.texture.key });
+                });
+
+                const state = {
+                    type: 'STATE',
+                    s1: { x: Math.round(this.ship1.x), y: Math.round(this.ship1.y) },
+                    s2: { x: Math.round(this.ship2.x), y: Math.round(this.ship2.y) },
+                    sc1: this.score1,
+                    sc2: this.score2,
+                    as: asteroidData
+                };
+                net.send(state);
+            }
+
+            handleNetworkData(data) {
+                if (net.role === 'host') {
+                    if (data.type === 'INPUT') {
+                        // Host receives P2 Input
+                        this.applyImpulse(this.ship2, data.x, data.y, 5);
+                    }
+                }
+                else if (net.role === 'client') {
+                    if (data.type === 'STATE') {
+                        // Client renders State
+                        this.ship1.setPosition(data.s1.x, data.s1.y);
+                        this.ship2.setPosition(data.s2.x, data.s2.y);
+
+                        this.score1 = data.sc1;
+                        this.score2 = data.sc2;
+                        this.scoreText1.setText('P1: ' + this.score1);
+                        this.scoreText2.setText('P2: ' + this.score2);
+
+                        // Sync Asteroids (Naive Approach: Clear and Recreate/Move)
+                        // For a simple prototype, we just match the pool. 
+                        const rocks = this.asteroids.getChildren();
+                        // Hide all first
+                        rocks.forEach(r => { r.setVisible(false); r.setActive(false); });
+
+                        data.as.forEach((d, index) => {
+                            let rock = rocks[index];
+                            if (!rock) {
+                                rock = new Asteroid(this, d.x, d.y);
+                                this.asteroids.add(rock);
+                            }
+                            rock.setPosition(d.x, d.y);
+                            rock.setTexture(d.t);
+                            rock.setVisible(true);
+                            rock.setActive(true);
+                        });
+
+                        // Check Win
+                        if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
+                            this.doGameOver();
+                        }
                     }
                 }
             }
@@ -418,6 +555,7 @@ The slower ship gets 3 points.
             }
 
             collectAsteroid(ship, asteroid, playerNum) {
+                // Only Host runs this
                 if (this.isGameOver) return;
                 const points = asteroid.points;
                 if (playerNum === 1) {
@@ -425,7 +563,7 @@ The slower ship gets 3 points.
                     this.scoreText1.setText('P1: ' + this.score1);
                 } else {
                     this.score2 += points;
-                    this.scoreText2.setText((this.isSinglePlayer ? 'CPU: ' : 'P2: ') + this.score2);
+                    this.scoreText2.setText((net.role === 'offline' ? 'CPU: ' : 'P2: ') + this.score2);
                 }
                 if (asteroid.growthTimer) asteroid.growthTimer.remove();
                 asteroid.destroy();
@@ -433,6 +571,7 @@ The slower ship gets 3 points.
             }
 
             handlePvpCollision(s1, s2) {
+                // Only Host runs this
                 if (this.isGameOver) return;
                 const speed1 = s1.body.speed;
                 const speed2 = s2.body.speed;
@@ -444,77 +583,63 @@ The slower ship gets 3 points.
 
                 if (speed1 > speed2) {
                     this.score2 += REWARD;
-                    this.scoreText2.setText((this.isSinglePlayer ? 'CPU: ' : 'P2: ') + this.score2);
+                    this.scoreText2.setText((net.role === 'offline' ? 'CPU: ' : 'P2: ') + this.score2);
                     s2.setTint(0x00ff00); this.time.delayedCall(200, () => s2.clearTint());
-                    this.showFloatingText(s2.x, s2.y, `+${REWARD}`, '#0088ff');
-                    this.animateScoreGain(this.scoreText2);
                 } else {
                     this.score1 += REWARD;
                     this.scoreText1.setText('P1: ' + this.score1);
                     s1.setTint(0x00ff00); this.time.delayedCall(200, () => s1.clearTint());
-                    this.showFloatingText(s1.x, s1.y, `+${REWARD}`, '#ff0044');
-                    this.animateScoreGain(this.scoreText1);
                 }
                 this.checkWin();
             }
 
-            animateScoreGain(textObj) {
-                this.tweens.add({ targets: textObj, scaleX: 1.5, scaleY: 1.5, duration: 100, yoyo: true, ease: 'Back.Out' });
-            }
-
-            showFloatingText(x, y, msg, color) {
-                const txt = this.add.text(x, y, msg, { fontFamily: 'Orbitron', fontSize: '40px', fontWeight: 'bold', color: '#fff', stroke: color, strokeThickness: 4 }).setOrigin(0.5).setDepth(100);
-                this.tweens.add({ targets: txt, y: y - 100, alpha: 0, duration: 1000, onComplete: () => txt.destroy() });
-            }
-
             checkWin() {
                 if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
-                    this.isGameOver = true;
-                    this.physics.pause();
-                    const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.8);
-                    overlay.setDepth(200);
-
-                    let winner = "";
-                    if (this.score1 >= WIN_SCORE) winner = "PLAYER 1";
-                    else winner = this.isSinglePlayer ? "CPU" : "PLAYER 2";
-
-                    const color = this.score1 >= WIN_SCORE ? "#ff0044" : "#0088ff";
-                    this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, `${winner} WINS!`, {
-                        fontFamily: 'Orbitron', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
-                    }).setOrigin(0.5).setDepth(201);
-
-                    const btn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 80, 'MAIN MENU', {
-                        fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
-                    }).setOrigin(0.5).setDepth(201).setInteractive();
-
-                    btn.on('pointerdown', () => this.scene.start('MainMenu'));
+                    this.doGameOver();
                 }
+            }
+
+            doGameOver() {
+                this.isGameOver = true;
+                this.physics.pause();
+                const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.8);
+                overlay.setDepth(200);
+
+                let winner = "";
+                if (this.score1 >= WIN_SCORE) winner = "PLAYER 1";
+                else winner = net.role === 'offline' ? "CPU" : "PLAYER 2";
+
+                const color = this.score1 >= WIN_SCORE ? "#ff0044" : "#0088ff";
+                this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, `${winner} WINS!`, {
+                    fontFamily: 'Orbitron', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
+                }).setOrigin(0.5).setDepth(201);
+
+                const btn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 80, 'MAIN MENU', {
+                    fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
+                }).setOrigin(0.5).setDepth(201).setInteractive();
+
+                btn.on('pointerdown', () => {
+                    if (net.conn) net.conn.close();
+                    window.location.reload();
+                });
             }
 
             generateTextures() {
                 if (this.textures.exists('ship1_tex')) return;
 
-                // --- P1 TEXTURE: RED CIRCLE + DOT + WHITE OUTLINE ---
+                // --- P1 TEXTURE ---
                 const g1 = this.make.graphics();
-                g1.lineStyle(2, 0xffffff);
-                g1.fillStyle(0xff0044);
-                g1.fillCircle(20, 20, 19);
-                g1.strokeCircle(20, 20, 19);
-                g1.fillStyle(0xffff00);
-                g1.fillCircle(20, 20, 6);
+                g1.lineStyle(2, 0xffffff); g1.fillStyle(0xff0044);
+                g1.fillCircle(20, 20, 19); g1.strokeCircle(20, 20, 19);
+                g1.fillStyle(0xffff00); g1.fillCircle(20, 20, 6);
                 g1.generateTexture('ship1_tex', 40, 40);
 
-                // --- P2 TEXTURE: BLUE CIRCLE + CROSS + WHITE OUTLINE ---
+                // --- P2 TEXTURE ---
                 const g2 = this.make.graphics();
-                g2.lineStyle(2, 0xffffff);
-                g2.fillStyle(0x0088ff);
-                g2.fillCircle(20, 20, 19);
-                g2.strokeCircle(20, 20, 19);
+                g2.lineStyle(2, 0xffffff); g2.fillStyle(0x0088ff);
+                g2.fillCircle(20, 20, 19); g2.strokeCircle(20, 20, 19);
                 g2.lineStyle(3, 0x000000);
-                g2.beginPath();
-                g2.moveTo(12, 12); g2.lineTo(28, 28);
-                g2.moveTo(28, 12); g2.lineTo(12, 28);
-                g2.strokePath();
+                g2.beginPath(); g2.moveTo(12, 12); g2.lineTo(28, 28); g2.moveTo(28, 12); g2.lineTo(12, 28); g2.strokePath();
                 g2.generateTexture('ship2_tex', 40, 40);
 
                 [['asteroid_small', 0x888888, 12], ['asteroid_med', 0xaaaaaa, 22], ['asteroid_large', 0xcccccc, 45]].forEach(data => {
@@ -550,7 +675,7 @@ The slower ship gets 3 points.
                 this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 8000), () => this.grow());
             }
             grow() {
-                if (!this.scene) return;
+                if (!this.scene || !this.active) return;
                 this.scene.tweens.add({
                     targets: this, scaleX: 0.1, scaleY: 0.1, duration: 200, ease: 'Back.In',
                     onComplete: () => {
