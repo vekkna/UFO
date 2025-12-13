@@ -28,7 +28,6 @@
             font-weight: 700;
         }
 
-        /* HTML UI Overlay for Lobby */
         #lobby-ui {
             position: absolute;
             top: 0;
@@ -474,10 +473,17 @@
                     if (data.type === 'INPUT') {
                         this.applyImpulse(this.ship2, data.x, data.y, 5);
                     }
+                    else if (data.type === 'REMATCH_REQ') {
+                        // Host receives Rematch Request from Client
+                        // Send Reset command to Client
+                        net.send({ type: 'RESTART' });
+                        // Restart Host
+                        this.scene.restart();
+                    }
                 }
                 else if (net.role === 'client') {
                     if (data.type === 'STATE') {
-                        if (this.isGameOver) return; // Don't process normal state if game over
+                        if (this.isGameOver) return;
                         this.ship1.setPosition(data.s1.x, data.s1.y);
                         this.ship2.setPosition(data.s2.x, data.s2.y);
 
@@ -505,6 +511,10 @@
                         this.score1 = data.sc1;
                         this.score2 = data.sc2;
                         this.doGameOver();
+                    }
+                    else if (data.type === 'RESTART') {
+                        // Restart Client
+                        this.scene.restart();
                     }
                 }
             }
@@ -562,9 +572,8 @@
             }
 
             checkWin() {
-                if (this.isGameOver) return; // Prevention
+                if (this.isGameOver) return;
                 if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
-                    // Send message BEFORE setting local game over, so logic doesn't block the network
                     if (net.role === 'host') {
                         net.send({ type: 'GAME_OVER', sc1: this.score1, sc2: this.score2 });
                     }
@@ -576,7 +585,6 @@
                 this.isGameOver = true;
                 this.physics.pause();
 
-                // Final text update to ensure UI matches
                 this.scoreText1.setText('P1: ' + this.score1);
                 this.scoreText2.setText((net.role === 'offline' ? 'CPU: ' : 'P2: ') + this.score2);
 
@@ -592,11 +600,31 @@
                     fontFamily: 'Orbitron', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
                 }).setOrigin(0.5).setDepth(201);
 
-                const btn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 80, 'MAIN MENU', {
+                // --- PLAY AGAIN BUTTON ---
+                const restartBtn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 60, 'PLAY AGAIN', {
+                    fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#006600', padding: { x: 20, y: 10 }
+                }).setOrigin(0.5).setDepth(201).setInteractive();
+
+                restartBtn.on('pointerdown', () => {
+                    if (net.role === 'host') {
+                        net.send({ type: 'RESTART' });
+                        this.scene.restart();
+                    } else if (net.role === 'client') {
+                        net.send({ type: 'REMATCH_REQ' });
+                        restartBtn.setText("WAITING...");
+                        restartBtn.setBackgroundColor('#333333');
+                    } else {
+                        // Offline
+                        this.scene.restart();
+                    }
+                });
+
+                // --- MAIN MENU BUTTON ---
+                const menuBtn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 140, 'MAIN MENU', {
                     fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setDepth(201).setInteractive();
 
-                btn.on('pointerdown', () => {
+                menuBtn.on('pointerdown', () => {
                     if (net.conn) net.conn.close();
                     window.location.reload();
                 });
