@@ -36,7 +36,6 @@
             width: 100%;
             height: 100%;
             pointer-events: none;
-            /* Let clicks pass through to Phaser usually, but we will toggle pointer events for inputs */
             display: none;
             justify-content: center;
             align-items: center;
@@ -87,7 +86,6 @@
             }
 
             init(id = null) {
-                // We prefix to avoid collisions with other random PeerJS users
                 const peerId = id ? `sd-${id}` : null;
                 this.peer = new Peer(peerId);
 
@@ -97,7 +95,7 @@
                 });
 
                 this.peer.on('connection', (conn) => {
-                    if (this.conn) { conn.close(); return; } // Limit to 1 player
+                    if (this.conn) { conn.close(); return; }
                     this.conn = conn;
                     this.setupConnEvents();
                     if (this.onConnect) this.onConnect();
@@ -121,7 +119,7 @@
                 });
                 this.conn.on('close', () => {
                     console.log('Connection closed');
-                    window.location.reload(); // Simple reset on disconnect
+                    window.location.reload();
                 });
             }
 
@@ -134,7 +132,7 @@
 
         const net = new NetworkMgr();
 
-        // --- AI CONTROLLER (Unchanged logic, just context aware) ---
+        // --- AI CONTROLLER ---
         class BotController {
             constructor(scene, ship, opponent, asteroids) {
                 this.scene = scene;
@@ -254,7 +252,6 @@
                 const w = this.scale.width;
                 const h = this.scale.height;
 
-                // Reset Net UI
                 document.getElementById('lobby-ui').style.display = 'none';
 
                 const border = this.add.graphics();
@@ -265,21 +262,17 @@
                     fontFamily: 'Orbitron', fontSize: '60px', fontWeight: '900', color: '#ffffff'
                 }).setOrigin(0.5);
 
-                // Button helpers
                 const btnY = (offset) => h * 0.4 + (offset * 80);
 
-                // 1. Single Player
                 this.createButton(w / 2, btnY(0), '1 PLAYER (VS AI)', 0xff0044, () => {
                     net.role = 'offline';
                     this.scene.start('GameScene');
                 });
 
-                // 2. Host Game
                 this.createButton(w / 2, btnY(1), 'HOST GAME', 0x0088ff, () => {
                     this.startHostSequence();
                 });
 
-                // 3. Join Game
                 this.createButton(w / 2, btnY(2), 'JOIN GAME', 0x00ff88, () => {
                     this.startJoinSequence();
                 });
@@ -294,7 +287,6 @@
             }
 
             startHostSequence() {
-                // Generate 3 random chars
                 const code = Math.random().toString(36).substring(2, 5).toUpperCase();
                 net.role = 'host';
                 net.init(code);
@@ -313,7 +305,7 @@
 
             startJoinSequence() {
                 net.role = 'client';
-                net.init(); // Init with auto ID
+                net.init();
 
                 const w = this.scale.width; const h = this.scale.height;
                 const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9).setInteractive();
@@ -328,7 +320,6 @@
                     fontFamily: 'Orbitron', fontSize: '24px', color: '#00ff88'
                 }).setOrigin(0.5);
 
-                // Add a "GO" button in Phaser to click after typing
                 const goBtn = this.add.text(w / 2, h * 0.6, '[ CONNECT ]', {
                     fontFamily: 'Orbitron', fontSize: '30px', color: '#ffffff', backgroundColor: '#004400', padding: 10
                 }).setOrigin(0.5).setInteractive();
@@ -364,7 +355,6 @@
                 });
 
                 this.setupShips();
-                // Client does not generate asteroids, it receives them
                 this.asteroids = this.physics.add.group({ classType: Asteroid, runChildUpdate: true });
 
                 if (net.role !== 'client') {
@@ -375,7 +365,6 @@
 
                 this.setupUI();
 
-                // HOST/OFFLINE Logic
                 if (net.role !== 'client') {
                     this.setupCollisions();
                     if (net.role === 'offline') {
@@ -385,36 +374,26 @@
                         this.scoreText2.setText('P2: 0');
                     }
                 } else {
-                    // CLIENT Logic
                     this.scoreText2.setText('P2: 0');
-                    // Disable physics body updates for Client (pure renderer)
                     this.ship1.body.moves = false;
                     this.ship2.body.moves = false;
                 }
 
-                // Global Input (Swipe anywhere)
                 this.input.on('pointerup', (pointer) => this.handleInput(pointer));
-
-                // Network Data Handlers
                 net.onData = (data) => this.handleNetworkData(data);
             }
 
             update() {
                 if (this.isGameOver) return;
 
-                if (net.role === 'client') {
-                    // CLIENT: Just rendering, no logic
-                    return;
-                }
+                if (net.role === 'client') return;
 
-                // HOST/OFFLINE: Run Physics
                 this.physics.world.wrap(this.ship1, 20);
                 this.physics.world.wrap(this.ship2, 20);
                 this.physics.world.wrap(this.asteroids, 60);
 
                 if (this.bot) this.bot.update();
 
-                // Broadcast State if Host
                 if (net.role === 'host') {
                     this.broadcastState();
                 }
@@ -458,17 +437,13 @@
 
                 const IMPULSE = 5;
 
-                // Input Logic based on Role
                 if (net.role === 'offline') {
-                    // Controls P1
                     this.applyImpulse(this.ship1, vectorX, vectorY, IMPULSE);
                 }
                 else if (net.role === 'host') {
-                    // Host controls P1 locally
                     this.applyImpulse(this.ship1, vectorX, vectorY, IMPULSE);
                 }
                 else if (net.role === 'client') {
-                    // Client sends vector to Host
                     net.send({ type: 'INPUT', x: vectorX, y: vectorY });
                 }
             }
@@ -478,7 +453,6 @@
             }
 
             broadcastState() {
-                // Send simplified representation of game
                 const asteroidData = [];
                 this.asteroids.getChildren().forEach(a => {
                     if (a.active) asteroidData.push({ x: Math.round(a.x), y: Math.round(a.y), t: a.texture.key });
@@ -498,13 +472,12 @@
             handleNetworkData(data) {
                 if (net.role === 'host') {
                     if (data.type === 'INPUT') {
-                        // Host receives P2 Input
                         this.applyImpulse(this.ship2, data.x, data.y, 5);
                     }
                 }
                 else if (net.role === 'client') {
                     if (data.type === 'STATE') {
-                        // Client renders State
+                        if (this.isGameOver) return; // Don't process normal state if game over
                         this.ship1.setPosition(data.s1.x, data.s1.y);
                         this.ship2.setPosition(data.s2.x, data.s2.y);
 
@@ -513,10 +486,7 @@
                         this.scoreText1.setText('P1: ' + this.score1);
                         this.scoreText2.setText('P2: ' + this.score2);
 
-                        // Sync Asteroids (Naive Approach: Clear and Recreate/Move)
-                        // For a simple prototype, we just match the pool. 
                         const rocks = this.asteroids.getChildren();
-                        // Hide all first
                         rocks.forEach(r => { r.setVisible(false); r.setActive(false); });
 
                         data.as.forEach((d, index) => {
@@ -530,11 +500,11 @@
                             rock.setVisible(true);
                             rock.setActive(true);
                         });
-
-                        // Check Win
-                        if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
-                            this.doGameOver();
-                        }
+                    }
+                    else if (data.type === 'GAME_OVER') {
+                        this.score1 = data.sc1;
+                        this.score2 = data.sc2;
+                        this.doGameOver();
                     }
                 }
             }
@@ -555,7 +525,6 @@
             }
 
             collectAsteroid(ship, asteroid, playerNum) {
-                // Only Host runs this
                 if (this.isGameOver) return;
                 const points = asteroid.points;
                 if (playerNum === 1) {
@@ -571,7 +540,6 @@
             }
 
             handlePvpCollision(s1, s2) {
-                // Only Host runs this
                 if (this.isGameOver) return;
                 const speed1 = s1.body.speed;
                 const speed2 = s2.body.speed;
@@ -594,7 +562,12 @@
             }
 
             checkWin() {
+                if (this.isGameOver) return; // Prevention
                 if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
+                    // Send message BEFORE setting local game over, so logic doesn't block the network
+                    if (net.role === 'host') {
+                        net.send({ type: 'GAME_OVER', sc1: this.score1, sc2: this.score2 });
+                    }
                     this.doGameOver();
                 }
             }
@@ -602,6 +575,11 @@
             doGameOver() {
                 this.isGameOver = true;
                 this.physics.pause();
+
+                // Final text update to ensure UI matches
+                this.scoreText1.setText('P1: ' + this.score1);
+                this.scoreText2.setText((net.role === 'offline' ? 'CPU: ' : 'P2: ') + this.score2);
+
                 const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.8);
                 overlay.setDepth(200);
 
@@ -627,14 +605,12 @@
             generateTextures() {
                 if (this.textures.exists('ship1_tex')) return;
 
-                // --- P1 TEXTURE ---
                 const g1 = this.make.graphics();
                 g1.lineStyle(2, 0xffffff); g1.fillStyle(0xff0044);
                 g1.fillCircle(20, 20, 19); g1.strokeCircle(20, 20, 19);
                 g1.fillStyle(0xffff00); g1.fillCircle(20, 20, 6);
                 g1.generateTexture('ship1_tex', 40, 40);
 
-                // --- P2 TEXTURE ---
                 const g2 = this.make.graphics();
                 g2.lineStyle(2, 0xffffff); g2.fillStyle(0x0088ff);
                 g2.fillCircle(20, 20, 19); g2.strokeCircle(20, 20, 19);
