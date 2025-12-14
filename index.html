@@ -139,6 +139,7 @@
         const LOGICAL_HEIGHT = 960;
         const ZONE_SIZE = 200;
         const WIN_SCORE = 50;
+        const COLLISION_BLAST_FORCE = 800; // Controls how hard ships blast apart on collision
 
         // --- NETWORK MANAGER ---
         class NetworkMgr {
@@ -207,7 +208,7 @@
                 this.asteroids = asteroids;
                 this.baseWeights = { greed: 1.0, aggression: 0.1 };
                 this.currentWeights = { ...this.baseWeights };
-                this.MAX_ACCEL = 3000;
+                this.MAX_ACCEL = 2000;
             }
 
             update() {
@@ -734,6 +735,14 @@
 
                 this.cameras.main.shake(200, 0.01);
                 this.particles.emitParticleAt((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 10);
+
+                // FORCE BLAST - Explicitly separate ships
+                const angle = Phaser.Math.Angle.Between(s1.x, s1.y, s2.x, s2.y);
+                // S1 goes opposite to angle
+                s1.setVelocity(Math.cos(angle + Math.PI) * COLLISION_BLAST_FORCE, Math.sin(angle + Math.PI) * COLLISION_BLAST_FORCE);
+                // S2 goes with angle
+                s2.setVelocity(Math.cos(angle) * COLLISION_BLAST_FORCE, Math.sin(angle) * COLLISION_BLAST_FORCE);
+
                 const REWARD = 5;
 
                 // NEW RULE: SHIP WITH LOWER SCORE GETS POINTS
