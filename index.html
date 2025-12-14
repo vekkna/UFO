@@ -122,13 +122,13 @@
         <div class="modal-content">
             <h2>GAME RULES</h2>
             <p>Swipe on the screen to move.</p>
-            <p>Collect 30 points of rocks to win.</p>
-            <p style="text-align: left; display: inline-block;">
+            <p id="rule-win-score">Collect 50 points of rocks to win.</p>
+            <p id="rule-points" style="text-align: left; display: inline-block;">
                 Small = 1pt<br>
                 Medium = 2pts<br>
                 Big = 5pts
             </p>
-            <p>When ships collide, the faster one was reckless,<br>so the slower one gets 5pts.</p>
+            <p id="rule-collision">When ships collide, the faster one was reckless,<br>so the slower one gets 3pts.</p>
             <button id="close-rules">CLOSE</button>
         </div>
     </div>
@@ -138,7 +138,60 @@
         const LOGICAL_WIDTH = 540;
         const LOGICAL_HEIGHT = 960;
         const ZONE_SIZE = 200;
-        const WIN_SCORE = 30;
+
+        const CONFIG = {
+            GAME: {
+                WIN_SCORE: 50, // Score to win
+                ASTEROID_SPAWN_DELAY: 2000,
+                COLLISION_REWARD: 3,
+                COLLISION_BLAST_FORCE: 800,
+                COLLISION_COOLDOWN: 500
+            },
+            SHIP: {
+                MAX_SPEED: 400,
+                MAX_ACCEL_AI: 1500, // Default AI Accel limit (will be overridden by difficulty/logic)
+                MAX_ACCEL_AI_BOOST: 3000, // The boosted accel we added
+                DRAG: 0.5,
+                BOUNCE: 0.9,
+                INPUT_IMPULSE: 5,
+                RADIUS: 30, // Physics radius (note: we used 20 before resizing visuals, but setCircle(30) in code. Let's make this 30)
+                RADIUS_COLLIDER: 30
+            },
+            ASTEROID: {
+                SPEED_MIN: 50,
+                SPEED_MAX: 150,
+                GROWTH_DELAY_MIN: 3000,
+                GROWTH_DELAY_MAX: 6000,
+                POINTS: { SMALL: 1, MED: 2, BIG: 5 },
+                RADIUS: { SMALL: 12, MED: 22, BIG: 45 },
+                STAGES: ['asteroid_small', 'asteroid_med', 'asteroid_large']
+            },
+            AI: {
+                // Behavioral Weights
+                BASE_GREED: 1.0,
+                BASE_AGGRESSION: 0.1,
+
+                // Losing/Winning Adjustments
+                LOSING_AGGRESSION: 2.0, // Was hardcoded as 2.0 in update
+                LOSING_GREED: 0.1,
+                WINNING_AGGRESSION: 0.0,
+                WINNING_GREED: 1.0,
+
+                // Distances
+                COMBAT_DISTANCE: 250, // Was 250/200 in various checks
+                ATTACK_RANGE: 200,
+
+                // Priority Scores
+                SCORE_EVADE_CRITICAL: 100000, // Evade when faster
+                SCORE_INTERCEPT_BASE: 2000, // Base intercept
+                SCORE_INTERCEPT_HUNT: 10000, // Hyper aggressive hunt
+                SCORE_SAFE_EVADE: 5000, // Evade when winning
+
+                // Rock Priorities
+                SCORE_ROCK_BIG: 3000,
+                SCORE_ROCK_MED_CLOSE: 2500
+            }
+        };
 
         // --- NETWORK MANAGER ---
         class NetworkMgr {
@@ -205,9 +258,10 @@
                 this.ship = ship;
                 this.opponent = opponent;
                 this.asteroids = asteroids;
-                this.baseWeights = { greed: 1.0, aggression: 0.1 };
+                this.asteroids = asteroids;
+                this.baseWeights = { greed: CONFIG.AI.BASE_GREED, aggression: CONFIG.AI.BASE_AGGRESSION };
                 this.currentWeights = { ...this.baseWeights };
-                this.MAX_ACCEL = 600;
+                this.MAX_ACCEL = CONFIG.SHIP.MAX_ACCEL_AI_BOOST;
             }
 
             update() {
@@ -226,8 +280,15 @@
                 const pScore = this.scene.score1;
                 const scoreDiff = myScore - pScore;
 
-                if (scoreDiff > 5) { this.currentWeights.aggression = 0.0; this.currentWeights.greed = 0.8; }
-                else if (scoreDiff < -5) { this.currentWeights.aggression = 0.6; this.currentWeights.greed = 1.2; }
+                if (myScore < pScore) {
+                    // We are losing. We want to collide.
+                    this.currentWeights.aggression = CONFIG.AI.LOSING_AGGRESSION;
+                    this.currentWeights.greed = CONFIG.AI.LOSING_GREED;
+                } else {
+                    // We are winning or tied. Avoid collision.
+                    this.currentWeights.aggression = CONFIG.AI.WINNING_AGGRESSION;
+                    this.currentWeights.greed = CONFIG.AI.WINNING_GREED;
+                }
 
                 const desires = [];
                 const pSpeed = this.opponent.body.speed;
@@ -235,8 +296,8 @@
                 const distToPlayer = this.getToroidalDistance(this.ship.x, this.ship.y, this.opponent.x, this.opponent.y);
 
                 // --- CRITICAL SAFETY OVERRIDE ---
-                let speedLimit = 400;
-                if (distToPlayer < 250) {
+                let speedLimit = CONFIG.SHIP.MAX_SPEED;
+                if (distToPlayer < CONFIG.AI.COMBAT_DISTANCE) {
                     if (mySpeed > pSpeed) { speedLimit = Math.max(0, pSpeed - 30); }
                 }
 
@@ -247,11 +308,20 @@
                     if (mySpeed > pSpeed) {
                         desires.push({ type: 'EVADE', score: 100000, target: this.opponent });
                     } else {
-                        let ramScore = 3000 * this.currentWeights.aggression;
-                        desires.push({
-                            type: 'INTERCEPT', score: ramScore, target: this.opponent,
-                            desiredSpeed: pSpeed - 10, position: { x: this.opponent.x, y: this.opponent.y }
-                        });
+                        // 1. Check Intercept (Base Priority)
+                        // Only if close enough to matter
+                        if (distToPlayer < CONFIG.AI.COMBAT_DISTANCE) {
+                            desires.push({
+                                type: 'INTERCEPT', score: CONFIG.AI.SCORE_INTERCEPT_BASE, target: this.opponent,
+                                desiredSpeed: this.MAX_ACCEL, position: { x: this.opponent.x, y: this.opponent.y }
+                            });
+                        } else {
+                            // If too far, lightly desire to get closer (lower score)
+                            desires.push({
+                                type: 'INTERCEPT', score: 500, target: this.opponent,
+                                desiredSpeed: this.MAX_ACCEL, position: { x: this.opponent.x, y: this.opponent.y }
+                            });
+                        }
                     }
                 } else if (asteroidCount === 0 && distToPlayer < 200) {
                     // Safe start evasion
@@ -294,14 +364,26 @@
                         angleCost = diff * 150;
                     }
 
-                    let value = Math.pow(rock.points, 3);
-                    let score = ((value * 2000 * denialMult) / (dist + angleCost + 10));
+                    let score = 0;
+                    // PRIORITY 1: Big Rocks (Any distance)
+                    if (rock.points >= CONFIG.ASTEROID.POINTS.BIG) {
+                        score = CONFIG.AI.SCORE_ROCK_BIG;
+                    }
+                    // PRIORITY 2: Medium Rocks (Close)
+                    else if (rock.points >= CONFIG.ASTEROID.POINTS.MED && dist < CONFIG.AI.ATTACK_RANGE) {
+                        score = CONFIG.AI.SCORE_ROCK_MED_CLOSE;
+                    }
+                    // Default scoring for other rocks
+                    else {
+                        let value = Math.pow(rock.points, 3);
+                        score = ((value * 2000 * denialMult) / (dist + angleCost + 10));
+                    }
                     score *= this.currentWeights.greed;
 
                     desires.push({
                         type: 'COLLECT', target: rock, score: score,
                         position: { x: futureRockX, y: futureRockY },
-                        isBig: rock.points >= 5
+                        isBig: rock.points >= CONFIG.ASTEROID.POINTS.BIG
                     });
                 });
 
@@ -508,7 +590,7 @@
 
                 if (net.role !== 'client') {
                     this.spawnEvent = this.time.addEvent({
-                        delay: 2000, callback: this.spawnAsteroid, callbackScope: this, loop: true
+                        delay: CONFIG.GAME.ASTEROID_SPAWN_DELAY, callback: this.spawnAsteroid, callbackScope: this, loop: true
                     });
                 }
 
@@ -554,11 +636,11 @@
                 const p2StartX = this.scale.width - (ZONE_SIZE / 2);
                 const p2StartY = ZONE_SIZE / 2;
 
-                this.ship1 = this.physics.add.sprite(p1StartX, p1StartY, 'ship1_tex').setCircle(20);
-                this.ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex').setCircle(20);
+                this.ship1 = this.physics.add.sprite(p1StartX, p1StartY, 'ship1_tex').setCircle(CONFIG.SHIP.RADIUS_COLLIDER);
+                this.ship2 = this.physics.add.sprite(p2StartX, p2StartY, 'ship2_tex').setCircle(CONFIG.SHIP.RADIUS_COLLIDER);
 
                 [this.ship1, this.ship2].forEach(s => {
-                    s.setDamping(true); s.setDrag(0.5); s.setBounce(0.9); s.setMaxVelocity(400);
+                    s.setDamping(true); s.setDrag(CONFIG.SHIP.DRAG); s.setBounce(CONFIG.SHIP.BOUNCE); s.setMaxVelocity(CONFIG.SHIP.MAX_SPEED);
                 });
             }
 
@@ -584,7 +666,7 @@
                 const vectorY = pointer.upY - pointer.downY;
                 if (Math.abs(vectorX) < 5 && Math.abs(vectorY) < 5) return;
 
-                const IMPULSE = 5;
+                const IMPULSE = CONFIG.SHIP.INPUT_IMPULSE;
 
                 if (net.role === 'offline') {
                     this.applyImpulse(this.ship1, vectorX, vectorY, IMPULSE);
@@ -697,13 +779,25 @@
 
             handlePvpCollision(s1, s2) {
                 if (this.isGameOver) return;
-                const speed1 = s1.body.speed;
-                const speed2 = s2.body.speed;
-                if (Math.abs(speed1 - speed2) < 2) return;
+                // Add cooldown to prevent spamming collision points
+                const now = this.time.now;
+                if (this.lastCollisionTime && now - this.lastCollisionTime < CONFIG.GAME.COLLISION_COOLDOWN) return;
+                this.lastCollisionTime = now;
 
                 this.cameras.main.shake(200, 0.01);
                 this.particles.emitParticleAt((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 10);
-                const REWARD = 5;
+
+                // FORCE BLAST - Explicitly separate ships
+                const angle = Phaser.Math.Angle.Between(s1.x, s1.y, s2.x, s2.y);
+                // S1 goes opposite to angle
+                s1.setVelocity(Math.cos(angle + Math.PI) * CONFIG.GAME.COLLISION_BLAST_FORCE, Math.sin(angle + Math.PI) * CONFIG.GAME.COLLISION_BLAST_FORCE);
+                // S2 goes with angle
+                s2.setVelocity(Math.cos(angle) * CONFIG.GAME.COLLISION_BLAST_FORCE, Math.sin(angle) * CONFIG.GAME.COLLISION_BLAST_FORCE);
+
+                const REWARD = CONFIG.GAME.COLLISION_REWARD;
+                const speed1 = s1.body.speed;
+                const speed2 = s2.body.speed;
+                if (Math.abs(speed1 - speed2) < 2) return;
 
                 if (speed1 > speed2) {
                     this.score2 += REWARD;
@@ -719,7 +813,7 @@
 
             checkWin() {
                 if (this.isGameOver) return;
-                if (this.score1 >= WIN_SCORE || this.score2 >= WIN_SCORE) {
+                if (this.score1 >= CONFIG.GAME.WIN_SCORE || this.score2 >= CONFIG.GAME.WIN_SCORE) {
                     if (net.role === 'host') {
                         net.send({ type: 'GAME_OVER', sc1: this.score1, sc2: this.score2 });
                     }
@@ -738,10 +832,10 @@
                 overlay.setDepth(200);
 
                 let winner = "";
-                if (this.score1 >= WIN_SCORE) winner = "PLAYER 1";
+                if (this.score1 >= CONFIG.GAME.WIN_SCORE) winner = "PLAYER 1";
                 else winner = net.role === 'offline' ? "CPU" : "PLAYER 2";
 
-                const color = this.score1 >= WIN_SCORE ? "#ff0044" : "#0088ff";
+                const color = this.score1 >= CONFIG.GAME.WIN_SCORE ? "#ff0044" : "#0088ff";
                 this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, `${winner} WINS!`, {
                     fontFamily: 'Chakra Petch', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
                 }).setOrigin(0.5).setDepth(201);
@@ -807,19 +901,19 @@
             constructor(scene, x, y) {
                 super(scene, x, y, 'asteroid_small');
                 scene.add.existing(this); scene.physics.add.existing(this);
-                this.stage = 1; this.points = 1; this.body.setBounce(1); this.body.setCircle(12);
+                this.stage = 1; this.points = CONFIG.ASTEROID.POINTS.SMALL; this.body.setBounce(1); this.body.setCircle(CONFIG.ASTEROID.RADIUS.SMALL);
             }
             launch(scene) {
                 const tx = Phaser.Math.Between(scene.scale.width * 0.2, scene.scale.width * 0.8);
                 const ty = Phaser.Math.Between(scene.scale.height * 0.2, scene.scale.height * 0.8);
                 const angle = Phaser.Math.Angle.Between(this.x, this.y, tx, ty);
-                scene.physics.velocityFromRotation(angle, Phaser.Math.Between(50, 150), this.body.velocity);
+                scene.physics.velocityFromRotation(angle, Phaser.Math.Between(CONFIG.ASTEROID.SPEED_MIN, CONFIG.ASTEROID.SPEED_MAX), this.body.velocity);
                 this.setAngularVelocity(Phaser.Math.Between(-20, 20));
                 this.setNextGrowth(scene);
             }
             setNextGrowth(scene) {
                 if (this.stage >= 3) return;
-                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 8000), () => this.grow());
+                this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(CONFIG.ASTEROID.GROWTH_DELAY_MIN, CONFIG.ASTEROID.GROWTH_DELAY_MAX), () => this.grow());
             }
             grow() {
                 // FIX 3: STOP GROWING IF GAME IS OVER
@@ -830,8 +924,8 @@
                     onComplete: () => {
                         if (!this.scene || !this.active || this.scene.isGameOver) return;
                         this.stage++;
-                        if (this.stage === 2) { this.setTexture('asteroid_med'); this.body.setCircle(22); this.points = 2; }
-                        else if (this.stage === 3) { this.setTexture('asteroid_large'); this.body.setCircle(45); this.points = 5; }
+                        if (this.stage === 2) { this.setTexture('asteroid_med'); this.body.setCircle(CONFIG.ASTEROID.RADIUS.MED); this.points = CONFIG.ASTEROID.POINTS.MED; }
+                        else if (this.stage === 3) { this.setTexture('asteroid_large'); this.body.setCircle(CONFIG.ASTEROID.RADIUS.BIG); this.points = CONFIG.ASTEROID.POINTS.BIG; }
                         this.scene.tweens.add({ targets: this, scaleX: 1, scaleY: 1, duration: 400, ease: 'Back.Out' });
                         this.setNextGrowth(this.scene);
                     }
@@ -853,6 +947,18 @@
         };
 
         const game = new Phaser.Game(config);
+
+        // --- DYNAMIC UI UPDATES ---
+        function updateRulesUI() {
+            document.getElementById('rule-win-score').innerText = `Collect ${CONFIG.GAME.WIN_SCORE} points of rocks to win.`;
+            document.getElementById('rule-points').innerHTML = `
+                Small = ${CONFIG.ASTEROID.POINTS.SMALL}pt<br>
+                Medium = ${CONFIG.ASTEROID.POINTS.MED}pts<br>
+                Big = ${CONFIG.ASTEROID.POINTS.BIG}pts
+            `;
+            document.getElementById('rule-collision').innerHTML = `When ships collide, the faster one was reckless,<br>so the slower one gets ${CONFIG.GAME.COLLISION_REWARD}pts.`;
+        }
+        updateRulesUI();
     </script>
 
 </body>
