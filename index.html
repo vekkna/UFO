@@ -128,7 +128,7 @@
                 Medium = 2pts<br>
                 Big = 5pts
             </p>
-            <p>When ships collide, the faster one was reckless,<br>so the slower one gets 5pts.</p>
+            <p>When ships collide, the underdog strikes back!<br>The ship with the lower score gets 3pts.</p>
             <button id="close-rules">CLOSE</button>
         </div>
     </div>
@@ -211,51 +211,48 @@
             }
 
             update() {
-                // 0. RESET WEIGHTS & SAFE START CHECK
+                // 0. RESET WEIGHTS
                 this.currentWeights = { ...this.baseWeights };
                 const asteroidCount = this.asteroids.countActive();
-
-                // FIX 1: RECKLESS START PREVENTION
-                // If there are no asteroids, force aggression to 0 so we don't ram randomly.
-                if (asteroidCount === 0) {
-                    this.currentWeights.aggression = 0.0;
-                }
 
                 // 1. SCORE ADAPTATION
                 const myScore = this.scene.score2;
                 const pScore = this.scene.score1;
-                const scoreDiff = myScore - pScore;
 
-                if (scoreDiff > 5) { this.currentWeights.aggression = 0.0; this.currentWeights.greed = 0.8; }
-                else if (scoreDiff < -5) { this.currentWeights.aggression = 0.6; this.currentWeights.greed = 1.2; }
+                // NEW BEHAVIOR:
+                // Losing -> Aggressive (Try to hit player to get 3pts)
+                // Winning -> Evasive (Avoid player to prevent them getting 3pts)
+                // Tied -> Evasive (Play it safe, or just collect rocks)
+
+                if (myScore < pScore) {
+                    // We are losing. We want to collide.
+                    this.currentWeights.aggression = 1.0;
+                    this.currentWeights.greed = 0.5; // Focus less on rocks, more on violence
+                } else {
+                    // We are winning or tied. Avoid collision.
+                    this.currentWeights.aggression = 0.0;
+                    this.currentWeights.greed = 1.0;
+                }
 
                 const desires = [];
                 const pSpeed = this.opponent.body.speed;
-                const mySpeed = this.ship.body.speed;
                 const distToPlayer = this.getToroidalDistance(this.ship.x, this.ship.y, this.opponent.x, this.opponent.y);
 
-                // --- CRITICAL SAFETY OVERRIDE ---
-                let speedLimit = 400;
-                if (distToPlayer < 250) {
-                    if (mySpeed > pSpeed) { speedLimit = Math.max(0, pSpeed - 30); }
-                }
-
                 // --- BEHAVIOR 1: COLLISION LOGIC ---
-                // Only fight if we are losing or it's a guaranteed win
-                // Added Check: asteroidCount > 0. Don't fight if the game just started (empty space).
-                if (asteroidCount > 0 && distToPlayer < 140 && this.isMovingTowards(this.ship, this.opponent)) {
-                    if (mySpeed > pSpeed) {
-                        desires.push({ type: 'EVADE', score: 100000, target: this.opponent });
-                    } else {
-                        let ramScore = 3000 * this.currentWeights.aggression;
+                // If we are aggressive (losing), we want to hit the player.
+                // If we are not aggressive (winning/tied), we want to avoid.
+
+                if (distToPlayer < 200) {
+                    if (this.currentWeights.aggression > 0.5) {
+                        // HUNT
                         desires.push({
-                            type: 'INTERCEPT', score: ramScore, target: this.opponent,
-                            desiredSpeed: pSpeed - 10, position: { x: this.opponent.x, y: this.opponent.y }
+                            type: 'INTERCEPT', score: 2000, target: this.opponent,
+                            desiredSpeed: this.MAX_ACCEL, position: { x: this.opponent.x, y: this.opponent.y }
                         });
+                    } else {
+                        // FLEE
+                        desires.push({ type: 'EVADE', score: 5000, target: this.opponent });
                     }
-                } else if (asteroidCount === 0 && distToPlayer < 200) {
-                    // Safe start evasion
-                    desires.push({ type: 'EVADE', score: 500, target: this.opponent });
                 }
 
                 // --- BEHAVIOR 2: HUNT ROCKS ---
@@ -273,18 +270,6 @@
 
                     const dist = this.getToroidalDistance(this.ship.x, this.ship.y, futureRockX, futureRockY);
 
-                    // FIX 2: CONTESTED ROCK LOGIC
-                    // Calculate Player's distance to this specific rock
-                    const playerDistToRock = this.getToroidalDistance(this.opponent.x, this.opponent.y, futureRockX, futureRockY);
-
-                    // Denial Multiplier: If player is closer to the rock than me (or it's a tight race),
-                    // dramatically increase the value of this rock so I steal it.
-                    let denialMult = 1.0;
-                    // If player is closer OR roughly same distance (1.2 buffer)
-                    if (playerDistToRock < dist * 1.2) {
-                        denialMult = 5.0; // High priority to deny
-                    }
-
                     // MOMENTUM CHECK
                     let angleCost = 0;
                     if (this.ship.body.speed > 50) {
@@ -295,7 +280,7 @@
                     }
 
                     let value = Math.pow(rock.points, 3);
-                    let score = ((value * 2000 * denialMult) / (dist + angleCost + 10));
+                    let score = ((value * 2000) / (dist + angleCost + 10));
                     score *= this.currentWeights.greed;
 
                     desires.push({
@@ -317,11 +302,10 @@
 
                 if (bestDesire.type === 'EVADE') {
                     const angleToOpponent = Phaser.Math.Angle.Between(this.ship.x, this.ship.y, this.opponent.x, this.opponent.y);
-                    this.scene.physics.velocityFromRotation(angleToOpponent + 1.57, 400, this.ship.body.acceleration);
+                    this.scene.physics.velocityFromRotation(angleToOpponent + Math.PI, 400, this.ship.body.acceleration);
                 }
                 else if (bestDesire.type === 'COLLECT' || bestDesire.type === 'CENTER') {
-                    const limit = bestDesire.isBig ? 400 : speedLimit;
-                    this.applySteeringForce(bestDesire.position.x, bestDesire.position.y, limit);
+                    this.applySteeringForce(bestDesire.position.x, bestDesire.position.y, 400); // Always max speed for now
                 }
                 else if (bestDesire.type === 'INTERCEPT') {
                     this.applySteeringForce(bestDesire.position.x, bestDesire.position.y, bestDesire.desiredSpeed);
@@ -518,15 +502,13 @@
                     this.setupCollisions();
                     if (net.role === 'offline') {
                         this.bot = new BotController(this, this.ship2, this.ship1, this.asteroids);
-                        this.scoreText2.setText('CPU: 0');
-                    } else {
-                        this.scoreText2.setText('P2: 0');
                     }
                 } else {
-                    this.scoreText2.setText('P2: 0');
                     this.ship1.body.moves = false;
                     this.ship2.body.moves = false;
                 }
+
+                this.updateScoreLabels();
 
                 this.input.on('pointerup', (pointer) => this.handleInput(pointer));
                 net.onData = (data) => this.handleNetworkData(data);
@@ -542,6 +524,10 @@
                 this.physics.world.wrap(this.asteroids, 60);
 
                 if (this.bot) this.bot.update();
+
+                // Update Score Label positions
+                this.scoreLabel1.setPosition(this.ship1.x, this.ship1.y);
+                this.scoreLabel2.setPosition(this.ship2.x, this.ship2.y);
 
                 if (net.role === 'host') {
                     this.broadcastState();
@@ -573,9 +559,17 @@
                 zg.lineStyle(4, 0x333333);
                 zg.strokeRect(0, 0, this.scale.width, this.scale.height);
 
-                const fontStyle = { fontFamily: 'Chakra Petch', fontSize: '32px', fontWeight: 'bold' };
-                this.scoreText1 = this.add.text(20, this.scale.height - 60, 'P1: 0', { ...fontStyle, color: '#ff0044' }).setDepth(100);
-                this.scoreText2 = this.add.text(this.scale.width - 180, 30, 'P2: 0', { ...fontStyle, color: '#0088ff' }).setDepth(100);
+                const fontStyle = { fontFamily: 'Chakra Petch', fontSize: '20px', fontWeight: 'bold' };
+                // Create labels ON the ships
+                this.scoreLabel1 = this.add.text(0, 0, '0', { ...fontStyle, color: '#ffffff', stroke: '#000000', strokeThickness: 4 }).setOrigin(0.5);
+                this.scoreLabel2 = this.add.text(0, 0, '0', { ...fontStyle, color: '#ffffff', stroke: '#000000', strokeThickness: 4 }).setOrigin(0.5);
+                this.scoreLabel1.setDepth(150);
+                this.scoreLabel2.setDepth(150);
+            }
+
+            updateScoreLabels() {
+                this.scoreLabel1.setText(this.score1);
+                this.scoreLabel2.setText(this.score2);
             }
 
             handleInput(pointer) {
@@ -636,8 +630,7 @@
 
                         this.score1 = data.sc1;
                         this.score2 = data.sc2;
-                        this.scoreText1.setText('P1: ' + this.score1);
-                        this.scoreText2.setText('P2: ' + this.score2);
+                        this.updateScoreLabels();
 
                         const rocks = this.asteroids.getChildren();
                         rocks.forEach(r => { r.setVisible(false); r.setActive(false); });
@@ -685,11 +678,10 @@
                 const points = asteroid.points;
                 if (playerNum === 1) {
                     this.score1 += points;
-                    this.scoreText1.setText('P1: ' + this.score1);
                 } else {
                     this.score2 += points;
-                    this.scoreText2.setText((net.role === 'offline' ? 'CPU: ' : 'P2: ') + this.score2);
                 }
+                this.updateScoreLabels();
                 if (asteroid.growthTimer) asteroid.growthTimer.remove();
                 asteroid.destroy();
                 this.checkWin();
@@ -697,23 +689,31 @@
 
             handlePvpCollision(s1, s2) {
                 if (this.isGameOver) return;
-                const speed1 = s1.body.speed;
-                const speed2 = s2.body.speed;
-                if (Math.abs(speed1 - speed2) < 2) return;
+
+                // Add cooldown to prevent spamming collision points
+                const now = this.time.now;
+                if (this.lastCollisionTime && now - this.lastCollisionTime < 500) return;
+                this.lastCollisionTime = now;
 
                 this.cameras.main.shake(200, 0.01);
                 this.particles.emitParticleAt((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 10);
-                const REWARD = 5;
+                const REWARD = 3;
 
-                if (speed1 > speed2) {
+                // NEW RULE: SHIP WITH LOWER SCORE GETS POINTS
+                if (this.score1 < this.score2) {
+                    this.score1 += REWARD;
+                    s1.setTint(0x00ff00); this.time.delayedCall(200, () => s1.clearTint());
+                } else if (this.score2 < this.score1) {
                     this.score2 += REWARD;
-                    this.scoreText2.setText((net.role === 'offline' ? 'CPU: ' : 'P2: ') + this.score2);
                     s2.setTint(0x00ff00); this.time.delayedCall(200, () => s2.clearTint());
                 } else {
-                    this.score1 += REWARD;
-                    this.scoreText1.setText('P1: ' + this.score1);
-                    s1.setTint(0x00ff00); this.time.delayedCall(200, () => s1.clearTint());
+                    // TIE = NO POINTS -> Flash both red to indicate "neutral" impact? Or just nothing.
+                    // Making them flash red to show collision but no reward.
+                    s1.setTint(0xff0000); s2.setTint(0xff0000);
+                    this.time.delayedCall(200, () => { s1.clearTint(); s2.clearTint(); });
                 }
+
+                this.updateScoreLabels();
                 this.checkWin();
             }
 
@@ -731,8 +731,8 @@
                 this.isGameOver = true;
                 this.physics.pause();
 
-                this.scoreText1.setText('P1: ' + this.score1);
-                this.scoreText2.setText((net.role === 'offline' ? 'CPU: ' : 'P2: ') + this.score2);
+                this.scoreLabel1.setVisible(false);
+                this.scoreLabel2.setVisible(false);
 
                 const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.8);
                 overlay.setDepth(200);
@@ -777,16 +777,20 @@
                 if (this.textures.exists('ship1_tex')) return;
 
                 const g1 = this.make.graphics();
-                g1.lineStyle(2, 0xffffff); g1.fillStyle(0xff0044);
-                g1.fillCircle(20, 20, 19); g1.strokeCircle(20, 20, 19);
-                g1.fillStyle(0xffff00); g1.fillCircle(20, 20, 6);
+                g1.fillStyle(0xff0044);
+                // Triangle
+                g1.beginPath(); g1.moveTo(0, 40); g1.lineTo(20, 0); g1.lineTo(40, 40); g1.closePath();
+                g1.fillPath();
+                g1.lineStyle(2, 0xffffff); g1.strokePath();
                 g1.generateTexture('ship1_tex', 40, 40);
 
                 const g2 = this.make.graphics();
-                g2.lineStyle(2, 0xffffff); g2.fillStyle(0x0088ff);
-                g2.fillCircle(20, 20, 19); g2.strokeCircle(20, 20, 19);
-                g2.lineStyle(3, 0x000000);
-                g2.beginPath(); g2.moveTo(12, 12); g2.lineTo(28, 28); g2.moveTo(28, 12); g2.lineTo(12, 28); g2.strokePath();
+                // Square/Blocky with "horns"
+                g2.fillStyle(0x0088ff);
+                g2.fillRect(5, 5, 30, 30);
+                g2.lineStyle(2, 0xffffff);
+                g2.strokeRect(5, 5, 30, 30);
+                g2.beginPath(); g2.moveTo(0, 0); g2.lineTo(10, 10); g2.moveTo(40, 0); g2.lineTo(30, 10); g2.strokePath();
                 g2.generateTexture('ship2_tex', 40, 40);
 
                 [['asteroid_small', 0x888888, 12], ['asteroid_med', 0xaaaaaa, 22], ['asteroid_large', 0xcccccc, 45]].forEach(data => {
