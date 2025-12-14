@@ -224,72 +224,108 @@
                 // Winning -> Evasive (Avoid player to prevent them getting 3pts)
                 // Tied -> Evasive (Play it safe, or just collect rocks)
 
-                if (myScore < pScore) {
-                    // We are losing. We want to collide.
-                    this.currentWeights.aggression = 2.0; // DOUBLE Aggression
-                    this.currentWeights.greed = 0.1; // Almost ignore rocks, focus on KILL
-                } else {
-                    // We are winning or tied. Avoid collision.
-                    this.currentWeights.aggression = 0.0;
-                    this.currentWeights.greed = 1.0;
-                }
-
                 const desires = [];
                 const pSpeed = this.opponent.body.speed;
                 const distToPlayer = this.getToroidalDistance(this.ship.x, this.ship.y, this.opponent.x, this.opponent.y);
 
-                // --- BEHAVIOR 1: COLLISION LOGIC ---
-                // If we are aggressive (losing), we want to hit the player.
-                // If we are not aggressive (winning/tied), we want to avoid.
+                if (myScore < pScore) {
+                    // LOSING STATE - Aggressive but Smart
+                    // Base Aggression INTERCEPT Score = 2000
 
-                if (distToPlayer < 200) {
-                    if (this.currentWeights.aggression > 0.5) {
-                        // HUNT - HYPER AGGRESSIVE
-                        // Base score 5000 + boost to ensure it beats rocks
+                    // 1. Check Intercept (Base Priority)
+                    // Only if close enough to matter
+                    if (distToPlayer < 250) {
                         desires.push({
-                            type: 'INTERCEPT', score: 10000, target: this.opponent,
+                            type: 'INTERCEPT', score: 2000, target: this.opponent,
                             desiredSpeed: this.MAX_ACCEL, position: { x: this.opponent.x, y: this.opponent.y }
                         });
                     } else {
-                        // FLEE
+                        // If too far, lightly desire to get closer (lower score)
+                        desires.push({
+                            type: 'INTERCEPT', score: 500, target: this.opponent,
+                            desiredSpeed: this.MAX_ACCEL, position: { x: this.opponent.x, y: this.opponent.y }
+                        });
+                    }
+
+                    // 2. Check Rocks (Overrides)
+                    this.asteroids.getChildren().forEach(rock => {
+                        if (!rock.active) return;
+
+                        const w = this.scene.scale.width; const h = this.scene.scale.height;
+                        const rawDist = Phaser.Math.Distance.Between(this.ship.x, this.ship.y, rock.x, rock.y);
+
+                        // Predict position
+                        const timeToHit = rawDist / 200;
+                        let futureRockX = rock.x + (rock.body.velocity.x * timeToHit);
+                        let futureRockY = rock.y + (rock.body.velocity.y * timeToHit);
+                        if (futureRockX < 0) futureRockX += w; if (futureRockX > w) futureRockX -= w;
+                        if (futureRockY < 0) futureRockY += h; if (futureRockY > h) futureRockY -= h;
+
+                        const dist = this.getToroidalDistance(this.ship.x, this.ship.y, futureRockX, futureRockY);
+
+                        let score = 0;
+
+                        // PRIORITY 1: Big Rocks (Any distance)
+                        if (rock.points >= 5) {
+                            score = 3000;
+                        }
+                        // PRIORITY 2: Medium Rocks (Close)
+                        else if (rock.points >= 2 && dist < 200) {
+                            score = 2500;
+                        }
+                        // Small or Far Medium = Ignore (Score 0)
+
+                        if (score > 0) {
+                            // Slight distance penalty to break ties
+                            score -= (dist / 10);
+                            desires.push({
+                                type: 'COLLECT', target: rock, score: score,
+                                position: { x: futureRockX, y: futureRockY },
+                                isBig: rock.points >= 5
+                            });
+                        }
+                    });
+
+                } else {
+                    // WINNING / TIED STATE - Standard Behavior (Evasive / Collector)
+
+                    if (distToPlayer < 200) {
                         desires.push({ type: 'EVADE', score: 5000, target: this.opponent });
                     }
-                }
 
-                // --- BEHAVIOR 2: HUNT ROCKS ---
-                this.asteroids.getChildren().forEach(rock => {
-                    if (!rock.active) return;
+                    this.asteroids.getChildren().forEach(rock => {
+                        if (!rock.active) return;
 
-                    const rawDist = Phaser.Math.Distance.Between(this.ship.x, this.ship.y, rock.x, rock.y);
-                    const timeToHit = rawDist / 200;
-                    let futureRockX = rock.x + (rock.body.velocity.x * timeToHit);
-                    let futureRockY = rock.y + (rock.body.velocity.y * timeToHit);
+                        const rawDist = Phaser.Math.Distance.Between(this.ship.x, this.ship.y, rock.x, rock.y);
+                        const timeToHit = rawDist / 200;
+                        let futureRockX = rock.x + (rock.body.velocity.x * timeToHit);
+                        let futureRockY = rock.y + (rock.body.velocity.y * timeToHit);
 
-                    const w = this.scene.scale.width; const h = this.scene.scale.height;
-                    if (futureRockX < 0) futureRockX += w; if (futureRockX > w) futureRockX -= w;
-                    if (futureRockY < 0) futureRockY += h; if (futureRockY > h) futureRockY -= h;
+                        const w = this.scene.scale.width; const h = this.scene.scale.height;
+                        if (futureRockX < 0) futureRockX += w; if (futureRockX > w) futureRockX -= w;
+                        if (futureRockY < 0) futureRockY += h; if (futureRockY > h) futureRockY -= h;
 
-                    const dist = this.getToroidalDistance(this.ship.x, this.ship.y, futureRockX, futureRockY);
+                        const dist = this.getToroidalDistance(this.ship.x, this.ship.y, futureRockX, futureRockY);
 
-                    // MOMENTUM CHECK
-                    let angleCost = 0;
-                    if (this.ship.body.speed > 50) {
-                        const angleToTarget = Phaser.Math.Angle.Between(this.ship.x, this.ship.y, futureRockX, futureRockY);
-                        const currentAngle = this.ship.body.velocity.angle();
-                        let diff = Math.abs(Phaser.Math.Angle.Wrap(angleToTarget - currentAngle));
-                        angleCost = diff * 150;
-                    }
+                        // MOMENTUM CHECK
+                        let angleCost = 0;
+                        if (this.ship.body.speed > 50) {
+                            const angleToTarget = Phaser.Math.Angle.Between(this.ship.x, this.ship.y, futureRockX, futureRockY);
+                            const currentAngle = this.ship.body.velocity.angle();
+                            let diff = Math.abs(Phaser.Math.Angle.Wrap(angleToTarget - currentAngle));
+                            angleCost = diff * 150;
+                        }
 
-                    let value = Math.pow(rock.points, 3);
-                    let score = ((value * 2000) / (dist + angleCost + 10));
-                    score *= this.currentWeights.greed;
+                        let value = Math.pow(rock.points, 3);
+                        let score = ((value * 2000) / (dist + angleCost + 10));
 
-                    desires.push({
-                        type: 'COLLECT', target: rock, score: score,
-                        position: { x: futureRockX, y: futureRockY },
-                        isBig: rock.points >= 5
+                        desires.push({
+                            type: 'COLLECT', target: rock, score: score,
+                            position: { x: futureRockX, y: futureRockY },
+                            isBig: rock.points >= 5
+                        });
                     });
-                });
+                }
 
                 // --- BEHAVIOR 3: CENTER CONTROL ---
                 desires.push({
