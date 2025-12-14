@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>STAR DRIFT: NETLINK</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;700;900&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body {
@@ -24,7 +24,7 @@
         .font-loader {
             position: absolute;
             opacity: 0;
-            font-family: 'Orbitron';
+            font-family: 'Chakra Petch';
             font-weight: 700;
         }
 
@@ -43,7 +43,7 @@
         }
 
         input {
-            font-family: 'Orbitron';
+            font-family: 'Chakra Petch';
             font-size: 24px;
             padding: 10px;
             text-align: center;
@@ -53,6 +53,58 @@
             border: 2px solid #0088ff;
             margin-bottom: 20px;
             pointer-events: auto;
+        }
+
+        #rules-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            background: #222;
+            border: 2px solid #0088ff;
+            padding: 20px;
+            max-width: 80%;
+            text-align: center;
+            font-family: 'Chakra Petch';
+            color: #fff;
+            box-shadow: 0 0 20px #0088ff;
+        }
+
+        .modal-content h2 {
+            color: #0088ff;
+            margin-top: 0;
+        }
+
+        .modal-content p {
+            font-size: 14px;
+            line-height: 1.5;
+            margin: 10px 0;
+        }
+
+        .modal-content button {
+            background: #004400;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            font-family: 'Chakra Petch';
+            font-size: 18px;
+            cursor: pointer;
+            margin-top: 10px;
+            border: 1px solid #00ff88;
+        }
+
+        .modal-content button:hover {
+            background: #006600;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
@@ -64,6 +116,21 @@
 
     <div id="lobby-ui">
         <input type="text" id="join-code" maxlength="3" placeholder="ENTER 3-CHAR CODE">
+    </div>
+
+    <div id="rules-modal">
+        <div class="modal-content">
+            <h2>GAME RULES</h2>
+            <p>Swipe on the screen to move.</p>
+            <p>Collect 30 points of rocks to win.</p>
+            <p style="text-align: left; display: inline-block;">
+                Small = 1pt<br>
+                Medium = 2pts<br>
+                Big = 5pts
+            </p>
+            <p>When ships collide, the faster one was reckless,<br>so the slower one gets 5pts.</p>
+            <button id="close-rules">CLOSE</button>
+        </div>
     </div>
 
     <script>
@@ -320,7 +387,7 @@
                 border.strokeRect(0, 0, w, h);
 
                 this.add.text(w / 2, h * 0.15, 'STAR DRIFT', {
-                    fontFamily: 'Orbitron', fontSize: '60px', fontWeight: '900', color: '#ffffff'
+                    fontFamily: 'Chakra Petch', fontSize: '60px', fontWeight: '900', color: '#ffffff'
                 }).setOrigin(0.5);
 
                 const btnY = (offset) => h * 0.4 + (offset * 80);
@@ -330,18 +397,26 @@
                     this.scene.start('GameScene');
                 });
 
-                this.createButton(w / 2, btnY(1), 'HOST GAME', 0x0088ff, () => {
+                this.createButton(w / 2, btnY(1), 'START 2-P GAME', 0x0088ff, () => {
                     this.startHostSequence();
                 });
 
-                this.createButton(w / 2, btnY(2), 'JOIN GAME', 0x00ff88, () => {
+                this.createButton(w / 2, btnY(2), 'JOIN 2-P GAME', 0x00ff88, () => {
                     this.startJoinSequence();
                 });
+
+                this.createButton(w / 2, btnY(3), 'RULES', 0xffaa00, () => {
+                    document.getElementById('rules-modal').style.display = 'flex';
+                });
+
+                document.getElementById('close-rules').onclick = () => {
+                    document.getElementById('rules-modal').style.display = 'none';
+                };
             }
 
             createButton(x, y, text, color, callback) {
                 const btn = this.add.text(x, y, text, {
-                    fontFamily: 'Orbitron', fontSize: '30px', fontWeight: 'bold', color: '#ffffff',
+                    fontFamily: 'Chakra Petch', fontSize: '30px', fontWeight: 'bold', color: '#ffffff',
                     backgroundColor: '#222222', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setInteractive();
                 btn.on('pointerdown', callback);
@@ -355,9 +430,22 @@
                 const w = this.scale.width; const h = this.scale.height;
                 const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.9).setInteractive();
 
-                const txt = this.add.text(w / 2, h / 2, `WAITING FOR P2...\n\nCODE: ${code}`, {
-                    fontFamily: 'Orbitron', fontSize: '30px', align: 'center', color: '#0088ff'
+                const txt = this.add.text(w / 2, h / 2 - 40, `WAITING FOR P2...\n\nCODE: ${code}`, {
+                    fontFamily: 'Chakra Petch', fontSize: '30px', align: 'center', color: '#0088ff'
                 }).setOrigin(0.5);
+
+                this.add.text(w / 2, h / 2 + 50, 'SHARE THIS CODE WITH YOUR FRIEND', {
+                    fontFamily: 'Chakra Petch', fontSize: '16px', color: '#888888'
+                }).setOrigin(0.5);
+
+                const cancelBtn = this.add.text(w / 2, h * 0.8, 'CANCEL', {
+                    fontFamily: 'Chakra Petch', fontSize: '24px', color: '#ff4444'
+                }).setOrigin(0.5).setInteractive();
+
+                cancelBtn.on('pointerdown', () => {
+                    if (net.peer) net.peer.destroy();
+                    window.location.reload();
+                });
 
                 net.onConnect = () => {
                     this.scene.start('GameScene');
@@ -378,11 +466,11 @@
                 input.focus();
 
                 this.add.text(w / 2, h * 0.3, 'ENTER HOST CODE:', {
-                    fontFamily: 'Orbitron', fontSize: '24px', color: '#00ff88'
+                    fontFamily: 'Chakra Petch', fontSize: '24px', color: '#00ff88'
                 }).setOrigin(0.5);
 
                 const goBtn = this.add.text(w / 2, h * 0.6, '[ CONNECT ]', {
-                    fontFamily: 'Orbitron', fontSize: '30px', color: '#ffffff', backgroundColor: '#004400', padding: 10
+                    fontFamily: 'Chakra Petch', fontSize: '30px', color: '#ffffff', backgroundColor: '#004400', padding: 10
                 }).setOrigin(0.5).setInteractive();
 
                 goBtn.on('pointerdown', () => {
@@ -394,7 +482,7 @@
                     }
                 });
 
-                const txt = this.add.text(w / 2, h * 0.5, '', { fontFamily: 'Orbitron', fontSize: '20px' }).setOrigin(0.5);
+                const txt = this.add.text(w / 2, h * 0.5, '', { fontFamily: 'Chakra Petch', fontSize: '20px' }).setOrigin(0.5);
 
                 net.onConnect = () => {
                     this.scene.start('GameScene');
@@ -485,7 +573,7 @@
                 zg.lineStyle(4, 0x333333);
                 zg.strokeRect(0, 0, this.scale.width, this.scale.height);
 
-                const fontStyle = { fontFamily: 'Orbitron', fontSize: '32px', fontWeight: 'bold' };
+                const fontStyle = { fontFamily: 'Chakra Petch', fontSize: '32px', fontWeight: 'bold' };
                 this.scoreText1 = this.add.text(20, this.scale.height - 60, 'P1: 0', { ...fontStyle, color: '#ff0044' }).setDepth(100);
                 this.scoreText2 = this.add.text(this.scale.width - 180, 30, 'P2: 0', { ...fontStyle, color: '#0088ff' }).setDepth(100);
             }
@@ -655,11 +743,11 @@
 
                 const color = this.score1 >= WIN_SCORE ? "#ff0044" : "#0088ff";
                 this.add.text(this.scale.width / 2, this.scale.height / 2 - 50, `${winner} WINS!`, {
-                    fontFamily: 'Orbitron', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
+                    fontFamily: 'Chakra Petch', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
                 }).setOrigin(0.5).setDepth(201);
 
                 const restartBtn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 60, 'PLAY AGAIN', {
-                    fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#006600', padding: { x: 20, y: 10 }
+                    fontFamily: 'Chakra Petch', fontSize: '30px', backgroundColor: '#006600', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setDepth(201).setInteractive();
 
                 restartBtn.on('pointerdown', () => {
@@ -676,7 +764,7 @@
                 });
 
                 const menuBtn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 140, 'MAIN MENU', {
-                    fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
+                    fontFamily: 'Chakra Petch', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setDepth(201).setInteractive();
 
                 menuBtn.on('pointerdown', () => {
