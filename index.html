@@ -78,7 +78,7 @@
             constructor() {
                 this.peer = null;
                 this.conn = null;
-                this.role = 'offline'; // 'host', 'client', 'offline'
+                this.role = 'offline';
                 this.myId = '';
                 this.onData = null;
                 this.onConnect = null;
@@ -144,25 +144,39 @@
             }
 
             update() {
+                // 0. RESET WEIGHTS & SAFE START CHECK
+                this.currentWeights = { ...this.baseWeights };
+                const asteroidCount = this.asteroids.countActive();
+
+                // FIX 1: RECKLESS START PREVENTION
+                // If there are no asteroids, force aggression to 0 so we don't ram randomly.
+                if (asteroidCount === 0) {
+                    this.currentWeights.aggression = 0.0;
+                }
+
+                // 1. SCORE ADAPTATION
                 const myScore = this.scene.score2;
                 const pScore = this.scene.score1;
                 const scoreDiff = myScore - pScore;
 
                 if (scoreDiff > 5) { this.currentWeights.aggression = 0.0; this.currentWeights.greed = 0.8; }
                 else if (scoreDiff < -5) { this.currentWeights.aggression = 0.6; this.currentWeights.greed = 1.2; }
-                else { this.currentWeights.aggression = 0.1; this.currentWeights.greed = 1.0; }
 
                 const desires = [];
                 const pSpeed = this.opponent.body.speed;
                 const mySpeed = this.ship.body.speed;
                 const distToPlayer = this.getToroidalDistance(this.ship.x, this.ship.y, this.opponent.x, this.opponent.y);
 
+                // --- CRITICAL SAFETY OVERRIDE ---
                 let speedLimit = 400;
                 if (distToPlayer < 250) {
                     if (mySpeed > pSpeed) { speedLimit = Math.max(0, pSpeed - 30); }
                 }
 
-                if (distToPlayer < 140 && this.isMovingTowards(this.ship, this.opponent)) {
+                // --- BEHAVIOR 1: COLLISION LOGIC ---
+                // Only fight if we are losing or it's a guaranteed win
+                // Added Check: asteroidCount > 0. Don't fight if the game just started (empty space).
+                if (asteroidCount > 0 && distToPlayer < 140 && this.isMovingTowards(this.ship, this.opponent)) {
                     if (mySpeed > pSpeed) {
                         desires.push({ type: 'EVADE', score: 100000, target: this.opponent });
                     } else {
@@ -172,19 +186,39 @@
                             desiredSpeed: pSpeed - 10, position: { x: this.opponent.x, y: this.opponent.y }
                         });
                     }
+                } else if (asteroidCount === 0 && distToPlayer < 200) {
+                    // Safe start evasion
+                    desires.push({ type: 'EVADE', score: 500, target: this.opponent });
                 }
 
+                // --- BEHAVIOR 2: HUNT ROCKS ---
                 this.asteroids.getChildren().forEach(rock => {
                     if (!rock.active) return;
+
                     const rawDist = Phaser.Math.Distance.Between(this.ship.x, this.ship.y, rock.x, rock.y);
                     const timeToHit = rawDist / 200;
                     let futureRockX = rock.x + (rock.body.velocity.x * timeToHit);
                     let futureRockY = rock.y + (rock.body.velocity.y * timeToHit);
+
                     const w = this.scene.scale.width; const h = this.scene.scale.height;
                     if (futureRockX < 0) futureRockX += w; if (futureRockX > w) futureRockX -= w;
                     if (futureRockY < 0) futureRockY += h; if (futureRockY > h) futureRockY -= h;
 
                     const dist = this.getToroidalDistance(this.ship.x, this.ship.y, futureRockX, futureRockY);
+
+                    // FIX 2: CONTESTED ROCK LOGIC
+                    // Calculate Player's distance to this specific rock
+                    const playerDistToRock = this.getToroidalDistance(this.opponent.x, this.opponent.y, futureRockX, futureRockY);
+
+                    // Denial Multiplier: If player is closer to the rock than me (or it's a tight race),
+                    // dramatically increase the value of this rock so I steal it.
+                    let denialMult = 1.0;
+                    // If player is closer OR roughly same distance (1.2 buffer)
+                    if (playerDistToRock < dist * 1.2) {
+                        denialMult = 5.0; // High priority to deny
+                    }
+
+                    // MOMENTUM CHECK
                     let angleCost = 0;
                     if (this.ship.body.speed > 50) {
                         const angleToTarget = Phaser.Math.Angle.Between(this.ship.x, this.ship.y, futureRockX, futureRockY);
@@ -192,13 +226,25 @@
                         let diff = Math.abs(Phaser.Math.Angle.Wrap(angleToTarget - currentAngle));
                         angleCost = diff * 150;
                     }
+
                     let value = Math.pow(rock.points, 3);
-                    let score = ((value * 2000) / (dist + angleCost + 10));
+                    let score = ((value * 2000 * denialMult) / (dist + angleCost + 10));
                     score *= this.currentWeights.greed;
-                    desires.push({ type: 'COLLECT', target: rock, score: score, position: { x: futureRockX, y: futureRockY }, isBig: rock.points >= 5 });
+
+                    desires.push({
+                        type: 'COLLECT', target: rock, score: score,
+                        position: { x: futureRockX, y: futureRockY },
+                        isBig: rock.points >= 5
+                    });
                 });
 
-                desires.push({ type: 'CENTER', score: 50, position: { x: this.scene.scale.width / 2, y: this.scene.scale.height / 2 } });
+                // --- BEHAVIOR 3: CENTER CONTROL ---
+                desires.push({
+                    type: 'CENTER', score: 50,
+                    position: { x: this.scene.scale.width / 2, y: this.scene.scale.height / 2 }
+                });
+
+                // --- EXECUTE ---
                 desires.sort((a, b) => b.score - a.score);
                 const bestDesire = desires[0];
 
@@ -219,26 +265,42 @@
                 const ship = this.ship;
                 let targetX = tx; let targetY = ty;
                 const w = this.scene.scale.width; const h = this.scene.scale.height;
-                if (targetX - ship.x > w / 2) targetX -= w; else if (targetX - ship.x < -w / 2) targetX += w;
-                if (targetY - ship.y > h / 2) targetY -= h; else if (targetY - ship.y < -h / 2) targetY += h;
-                let desiredX = targetX - ship.x; let desiredY = targetY - ship.y;
+
+                if (targetX - ship.x > w / 2) targetX -= w;
+                else if (targetX - ship.x < -w / 2) targetX += w;
+                if (targetY - ship.y > h / 2) targetY -= h;
+                else if (targetY - ship.y < -h / 2) targetY += h;
+
+                let desiredX = targetX - ship.x;
+                let desiredY = targetY - ship.y;
                 const length = Math.sqrt(desiredX * desiredX + desiredY * desiredY);
-                if (length > 0) { desiredX = (desiredX / length) * maxSpeed; desiredY = (desiredY / length) * maxSpeed; }
-                let steerX = desiredX - ship.body.velocity.x; let steerY = desiredY - ship.body.velocity.y;
+                if (length > 0) {
+                    desiredX = (desiredX / length) * maxSpeed;
+                    desiredY = (desiredY / length) * maxSpeed;
+                }
+
+                let steerX = desiredX - ship.body.velocity.x;
+                let steerY = desiredY - ship.body.velocity.y;
                 const steerLen = Math.sqrt(steerX * steerX + steerY * steerY);
-                if (steerLen > this.MAX_ACCEL) { steerX = (steerX / steerLen) * this.MAX_ACCEL; steerY = (steerY / steerLen) * this.MAX_ACCEL; }
+                if (steerLen > this.MAX_ACCEL) {
+                    steerX = (steerX / steerLen) * this.MAX_ACCEL;
+                    steerY = (steerY / steerLen) * this.MAX_ACCEL;
+                }
+
                 ship.setAcceleration(steerX, steerY);
             }
 
             getToroidalDistance(x1, y1, x2, y2) {
-                let dx = Math.abs(x1 - x2); let dy = Math.abs(y1 - y2);
+                let dx = Math.abs(x1 - x2);
+                let dy = Math.abs(y1 - y2);
                 if (dx > this.scene.scale.width / 2) dx = this.scene.scale.width - dx;
                 if (dy > this.scene.scale.height / 2) dy = this.scene.scale.height - dy;
                 return Math.sqrt(dx * dx + dy * dy);
             }
 
             isMovingTowards(source, target) {
-                const toTargetX = target.x - source.x; const toTargetY = target.y - source.y;
+                const toTargetX = target.x - source.x;
+                const toTargetY = target.y - source.y;
                 return ((source.body.velocity.x * toTargetX) + (source.body.velocity.y * toTargetY)) > 0;
             }
         }
@@ -474,10 +536,7 @@
                         this.applyImpulse(this.ship2, data.x, data.y, 5);
                     }
                     else if (data.type === 'REMATCH_REQ') {
-                        // Host receives Rematch Request from Client
-                        // Send Reset command to Client
                         net.send({ type: 'RESTART' });
-                        // Restart Host
                         this.scene.restart();
                     }
                 }
@@ -513,7 +572,6 @@
                         this.doGameOver();
                     }
                     else if (data.type === 'RESTART') {
-                        // Restart Client
                         this.scene.restart();
                     }
                 }
@@ -600,7 +658,6 @@
                     fontFamily: 'Orbitron', fontSize: '50px', fontWeight: '900', color: color, stroke: '#ffffff', strokeThickness: 2
                 }).setOrigin(0.5).setDepth(201);
 
-                // --- PLAY AGAIN BUTTON ---
                 const restartBtn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 60, 'PLAY AGAIN', {
                     fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#006600', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setDepth(201).setInteractive();
@@ -614,12 +671,10 @@
                         restartBtn.setText("WAITING...");
                         restartBtn.setBackgroundColor('#333333');
                     } else {
-                        // Offline
                         this.scene.restart();
                     }
                 });
 
-                // --- MAIN MENU BUTTON ---
                 const menuBtn = this.add.text(this.scale.width / 2, this.scale.height / 2 + 140, 'MAIN MENU', {
                     fontFamily: 'Orbitron', fontSize: '30px', backgroundColor: '#333', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5).setDepth(201).setInteractive();
@@ -679,11 +734,13 @@
                 this.growthTimer = scene.time.delayedCall(Phaser.Math.Between(4000, 8000), () => this.grow());
             }
             grow() {
-                if (!this.scene || !this.active) return;
+                // FIX 3: STOP GROWING IF GAME IS OVER
+                if (!this.scene || !this.active || this.scene.isGameOver) return;
+
                 this.scene.tweens.add({
                     targets: this, scaleX: 0.1, scaleY: 0.1, duration: 200, ease: 'Back.In',
                     onComplete: () => {
-                        if (!this.scene || !this.active) return;
+                        if (!this.scene || !this.active || this.scene.isGameOver) return;
                         this.stage++;
                         if (this.stage === 2) { this.setTexture('asteroid_med'); this.body.setCircle(22); this.points = 2; }
                         else if (this.stage === 3) { this.setTexture('asteroid_large'); this.body.setCircle(45); this.points = 5; }
