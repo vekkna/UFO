@@ -797,7 +797,7 @@
                 const REWARD = CONFIG.GAME.COLLISION_REWARD;
                 const speed1 = s1.body.speed;
                 const speed2 = s2.body.speed;
-                //  if (Math.abs(speed1 - speed2) < 2) return;
+                if (Math.abs(speed1 - speed2) < 2) return;
 
                 if (speed1 > speed2) {
                     this.score2 += REWARD;
